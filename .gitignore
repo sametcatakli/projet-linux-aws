@@ -1,0 +1,6 @@
+# .gitignore
+# This is a .gitignore file, which will prevent certain files from being uploaded to Git.
+# This particular .gitignore ignores .env file for MacOS, Linux and Windows.
+
+# Ignore .env file
+.env
