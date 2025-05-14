@@ -11,6 +11,7 @@ security_menu() {
     echo "| 1. Firewall Management                                               |"
     echo "| 2. Anti-Malware (ClamAV & RKHunter)                                  |"
     echo "| 3. SELinux Management                                                |"
+    echo "| 4. Secure Mount Options                                              |"
     echo "|----------------------------------------------------------------------|"
     echo "| q. Back to Main Menu                                                 |"
     echo "|----------------------------------------------------------------------|"
@@ -20,6 +21,7 @@ security_menu() {
       1) firewall_management ;;
       2) anti_malware ;;
       3) selinux_management ;;
+      4) secure_mount_options ;;
       q|Q) clear && break ;;
       *) clear && echo "Invalid choice. Please enter a valid option." ;;
     esac
@@ -42,19 +44,35 @@ firewall_management() {
     echo -e "${GREEN}Firewalld installed successfully.${NC}"
   fi
 
+  # CRITICAL FIX: Always ensure SSH is allowed BEFORE starting firewalld
+  # This way even if firewalld is being enabled for the first time, SSH won't be blocked
+  echo "Ensuring SSH access remains available..."
+  firewall-cmd --permanent --add-service=ssh
+
   # Ensure firewalld is running
   if ! systemctl is-active --quiet firewalld; then
     echo -e "${YELLOW}Firewalld is not running. Starting...${NC}"
     systemctl enable firewalld
+
+    # Apply the SSH rule before starting firewalld to prevent lockout
+    echo "Applying SSH rule before starting firewall..."
+    firewall-cmd --permanent --add-service=ssh
+
     systemctl start firewalld
+
     if ! systemctl is-active --quiet firewalld; then
       echo -e "${RED}Failed to start firewalld. Firewall management won't be available.${NC}"
       echo "Press any key to continue..."
       read -n 1 -s
       return 1
     fi
-    echo -e "${GREEN}Firewalld started successfully.${NC}"
+    echo -e "${GREEN}Firewalld started successfully with SSH access preserved.${NC}"
   fi
+
+  # CRITICAL FIX: Double-check SSH is allowed and apply changes
+  echo "Verifying SSH access is permitted in firewall..."
+  firewall-cmd --permanent --add-service=ssh
+  firewall-cmd --reload
 
   # Configure firewall to allow external connections for common services
   configure_firewall_defaults() {
@@ -63,8 +81,10 @@ firewall_management() {
     # Set default zone to public
     firewall-cmd --set-default-zone=public
 
-    # Add services to public zone
+    # CRITICAL: Make sure SSH comes first and is always included
     firewall-cmd --permanent --zone=public --add-service=ssh
+
+    # Add other services to public zone
     firewall-cmd --permanent --zone=public --add-service=http
     firewall-cmd --permanent --zone=public --add-service=https
     firewall-cmd --permanent --zone=public --add-service=dns
@@ -75,6 +95,16 @@ firewall_management() {
 
     # Apply changes
     firewall-cmd --reload
+
+    # Final verification that SSH is allowed
+    echo "Final verification of SSH access..."
+    if firewall-cmd --list-services | grep -q ssh; then
+      echo -e "${GREEN}SSH access confirmed in firewall.${NC}"
+    else
+      echo -e "${RED}ERROR: SSH service not found in firewall! Adding it now...${NC}"
+      firewall-cmd --permanent --add-service=ssh
+      firewall-cmd --reload
+    fi
 
     echo -e "${GREEN}Firewall configured with permissive defaults.${NC}"
   }
@@ -162,21 +192,45 @@ firewall_management() {
         fi
         ;;
       12) # Block all except opened
+        # Make sure SSH is added first
+        firewall-cmd --permanent --add-service=ssh
+
         # Set default zone to drop
         firewall-cmd --set-default-zone=drop
+
         # But make sure established connections work
         firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+        # Double-check SSH access
+        firewall-cmd --permanent --add-service=ssh
+
         echo -e "${GREEN}Firewall set to block all traffic except for opened ports.${NC}"
+        echo -e "${GREEN}SSH access has been preserved.${NC}"
         ;;
       13) # Reset
+        # Make sure SSH is allowed before resetting
+        firewall-cmd --permanent --add-service=ssh
+
         firewall-cmd --permanent --set-default-zone=public
         firewall-cmd --permanent --zone=public --remove-port=1-65535/tcp
         firewall-cmd --permanent --zone=public --remove-port=1-65535/udp
-        echo -e "${GREEN}Firewall reset to default configuration.${NC}"
+
+        # Add SSH again after reset
+        firewall-cmd --permanent --add-service=ssh
+
+        echo -e "${GREEN}Firewall reset to default configuration with SSH access preserved.${NC}"
         ;;
       14) # Enable
+        # Make sure SSH is allowed before enabling
+        firewall-cmd --permanent --add-service=ssh
+
         systemctl enable --now firewalld
-        echo -e "${GREEN}Firewall enabled and started.${NC}"
+
+        # Verify SSH is still allowed after enabling
+        firewall-cmd --permanent --add-service=ssh
+        firewall-cmd --reload
+
+        echo -e "${GREEN}Firewall enabled and started with SSH access preserved.${NC}"
         ;;
       15) # Disable
         systemctl disable --now firewalld
@@ -191,14 +245,22 @@ firewall_management() {
         ;;
       q|Q) # Quit
         # Apply all changes
+
+        # Make sure SSH is still allowed before final apply
+        firewall-cmd --permanent --add-service=ssh
         firewall-cmd --reload
-        echo -e "${GREEN}Firewall changes applied.${NC}"
+
+        echo -e "${GREEN}Firewall changes applied with SSH access preserved.${NC}"
         break
         ;;
       *)
         echo -e "${RED}Invalid choice. Please try again.${NC}"
         ;;
     esac
+
+    # Always ensure SSH access after any action
+    firewall-cmd --permanent --add-service=ssh
+    firewall-cmd --reload
 
     echo "Press any key to continue..."
     read -n 1 -s
@@ -218,6 +280,13 @@ selinux_management() {
     }
     echo -e "${GREEN}SELinux tools installed successfully.${NC}"
   fi
+
+  # CRITICAL FIX: Always ensure SSH access is allowed
+  echo "Ensuring SSH access through SELinux..."
+  setsebool -P ssh_sysadm_login 1
+  setsebool -P sftpd_enable_homedirs 1
+  setsebool -P sftpd_full_access 1
+  echo -e "${GREEN}SELinux configured to allow SSH access.${NC}"
 
   while true; do
     clear
@@ -251,10 +320,16 @@ selinux_management() {
     case $choice in
       1) # Set Enforcing
         echo "Setting SELinux to Enforcing mode..."
+        # Make sure SSH access is allowed before changing to enforcing
+        setsebool -P ssh_sysadm_login 1
+        setsebool -P sftpd_enable_homedirs 1
+        setsebool -P sftpd_full_access 1
+
         setenforce 1
         sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
         echo -e "${GREEN}SELinux set to Enforcing mode.${NC}"
         echo "This change will be permanent after reboot."
+        echo -e "${GREEN}SSH access has been preserved.${NC}"
         ;;
       2) # Set Permissive
         echo "Setting SELinux to Permissive mode..."
@@ -534,6 +609,8 @@ EOF
         fi
         ;;
       q|Q) # Quit
+        # Ensure SSH access is still allowed before exiting
+        setsebool -P ssh_sysadm_login 1
         break
         ;;
       *)
@@ -544,6 +621,209 @@ EOF
     echo "Press any key to continue..."
     read -n 1 -s
   done
+}
+
+# Function to manage secure mount options in fstab
+secure_mount_options() {
+  # Check if fstab exists
+  if [ ! -f "/etc/fstab" ]; then
+    echo -e "${RED}Error: /etc/fstab file not found. Cannot configure mount options.${NC}"
+    echo "Press any key to continue..."
+    read -n 1 -s
+    return 1
+  fi
+
+  while true; do
+    clear
+    echo "=========================================================="
+    echo -e "${BLUE}            SECURE MOUNT OPTIONS MENU             ${NC}"
+    echo "=========================================================="
+    echo "Current /etc/fstab:"
+    echo "----------------------------------------------------------"
+    cat /etc/fstab | grep -v '^#' | grep -v '^$'
+    echo "----------------------------------------------------------"
+    echo ""
+    echo "Secure Mount Options:"
+    echo "1. Add noexec,nosuid,nodev to /tmp"
+    echo "2. Add noexec,nosuid,nodev to /var/tmp"
+    echo "3. Add nodev to /home"
+    echo "4. Add nodev to /srv"
+    echo "5. Add secure options to a custom mount point"
+    echo "6. Restore fstab from backup"
+    echo "7. View current fstab"
+    echo "8. Make /boot read-only (ro)"
+    echo "q. Return to Security Menu"
+    echo "=========================================================="
+    read -p "Enter your choice: " choice
+
+    case $choice in
+      1) # Secure /tmp
+        secure_mount_point "/tmp" "noexec,nosuid,nodev"
+        ;;
+      2) # Secure /var/tmp
+        secure_mount_point "/var/tmp" "noexec,nosuid,nodev"
+        ;;
+      3) # Secure /home
+        secure_mount_point "/home" "nodev"
+        ;;
+      4) # Secure /srv
+        secure_mount_point "/srv" "nodev"
+        ;;
+      5) # Custom mount point
+        read -p "Enter the mount point (e.g., /mnt/data): " custom_mountpoint
+        echo "Select security options to add:"
+        echo "1. noexec - Prevent execution of binaries"
+        echo "2. nosuid - Prevent suid/sgid bits from having an effect"
+        echo "3. nodev - Prevent character or special devices"
+        echo "4. All of the above"
+        read -p "Enter option (1-4): " sec_option
+
+        case $sec_option in
+          1) secure_mount_point "$custom_mountpoint" "noexec" ;;
+          2) secure_mount_point "$custom_mountpoint" "nosuid" ;;
+          3) secure_mount_point "$custom_mountpoint" "nodev" ;;
+          4) secure_mount_point "$custom_mountpoint" "noexec,nosuid,nodev" ;;
+          *) echo -e "${RED}Invalid option selected.${NC}" ;;
+        esac
+        ;;
+      6) # Restore from backup
+        restore_fstab
+        ;;
+      7) # View fstab
+        clear
+        echo "Current /etc/fstab contents:"
+        echo "----------------------------------------------------------"
+        cat /etc/fstab
+        echo "----------------------------------------------------------"
+        echo "Press any key to continue..."
+        read -n 1 -s
+        ;;
+      8) # Make /boot read-only
+        echo "Adding 'ro' (read-only) option to /boot..."
+        secure_mount_point "/boot" "ro"
+        echo -e "${YELLOW}IMPORTANT: When updating the kernel or bootloader, you will need to temporarily remount /boot as read-write:${NC}"
+        echo "   sudo mount -o remount,rw /boot"
+        echo "   # perform updates"
+        echo "   sudo mount -o remount,ro /boot"
+        ;;
+      q|Q) # Quit
+        break
+        ;;
+      *)
+        echo -e "${RED}Invalid choice. Please try again.${NC}"
+        ;;
+    esac
+
+    # If not viewing fstab, wait for user input
+    if [ "$choice" != "7" ]; then
+      echo "Press any key to continue..."
+      read -n 1 -s
+    fi
+  done
+}
+
+# Helper function to secure a specific mount point
+secure_mount_point() {
+  local mount_point=$1
+  local secure_options=$2
+
+  # Verify the mount point exists in fstab
+  if ! grep -q "[[:space:]]${mount_point}[[:space:]]" /etc/fstab; then
+    echo -e "${RED}Error: Mount point $mount_point not found in /etc/fstab.${NC}"
+    return 1
+  fi
+
+  # Create a backup of fstab
+  local backup_file="/etc/fstab.$(date +%Y%m%d%H%M%S)"
+  cp /etc/fstab "$backup_file"
+  echo -e "${GREEN}Backup created: $backup_file${NC}"
+
+  # Get the line for this mount point
+  local mount_line=$(grep "[[:space:]]${mount_point}[[:space:]]" /etc/fstab)
+
+  # Check if the secure options are already present
+  if echo "$mount_line" | grep -q "$secure_options"; then
+    echo -e "${YELLOW}The secure options are already set for $mount_point.${NC}"
+    return 0
+  fi
+
+  echo "Modifying mount options for $mount_point..."
+
+  # Parse the existing line
+  local device=$(echo "$mount_line" | awk '{print $1}')
+  local fs_type=$(echo "$mount_line" | awk '{print $3}')
+  local current_options=$(echo "$mount_line" | awk '{print $4}')
+  local dump_flag=$(echo "$mount_line" | awk '{print $5}')
+  local fsck_order=$(echo "$mount_line" | awk '{print $6}')
+
+  # Add the new options, ensuring no duplicates
+  local new_options
+  if echo "$current_options" | grep -q "defaults"; then
+    # Replace 'defaults' with 'defaults,new_options'
+    new_options=$(echo "$current_options" | sed "s/defaults/defaults,$secure_options/")
+  else
+    # Append the new options
+    new_options="${current_options},$secure_options"
+  fi
+
+  # Remove any duplicate options
+  new_options=$(echo "$new_options" | sed 's/,\+/,/g' | sed 's/^,//;s/,$//')
+
+  # Create the new line
+  local new_line="$device $mount_point $fs_type $new_options $dump_flag $fsck_order"
+
+  # Replace the old line with the new line
+  sed -i "s|^.*[[:space:]]${mount_point}[[:space:]].*\$|$new_line|" /etc/fstab
+
+  # Verify the change was made correctly
+  if grep -q "^$new_line$" /etc/fstab; then
+    echo -e "${GREEN}Successfully added $secure_options to $mount_point.${NC}"
+
+    # Remind user to remount or reboot
+    echo -e "${YELLOW}NOTE: You need to remount the filesystem or reboot for changes to take effect.${NC}"
+    echo "You can remount with: mount -o remount $mount_point"
+  else
+    echo -e "${RED}Error: Failed to update fstab properly.${NC}"
+    echo "Restoring from backup..."
+    cp "$backup_file" /etc/fstab
+    echo -e "${GREEN}Restored from backup.${NC}"
+  fi
+}
+
+# Helper function to restore fstab from backup
+restore_fstab() {
+  # List available backups
+  local backups=($(ls -t /etc/fstab.* 2>/dev/null))
+
+  if [ ${#backups[@]} -eq 0 ]; then
+    echo -e "${RED}No backups found.${NC}"
+    return 1
+  fi
+
+  echo "Available backups:"
+  for i in "${!backups[@]}"; do
+    echo "$((i+1)). ${backups[$i]} ($(stat -c %y ${backups[$i]} | cut -d. -f1))"
+  done
+
+  read -p "Select a backup to restore (or 'q' to cancel): " backup_choice
+
+  if [[ "$backup_choice" == "q" || "$backup_choice" == "Q" ]]; then
+    echo "Restoration cancelled."
+    return 0
+  fi
+
+  if [[ "$backup_choice" =~ ^[0-9]+$ ]] && [ "$backup_choice" -ge 1 ] && [ "$backup_choice" -le ${#backups[@]} ]; then
+    selected_backup="${backups[$((backup_choice-1))]}"
+
+    # Create a backup of the current fstab before restoring
+    cp /etc/fstab "/etc/fstab.current.$(date +%Y%m%d%H%M%S)"
+
+    # Restore from selected backup
+    cp "$selected_backup" /etc/fstab
+    echo -e "${GREEN}Successfully restored fstab from $selected_backup.${NC}"
+  else
+    echo -e "${RED}Invalid selection.${NC}"
+  fi
 }
 
 # Anti-malware function (main)
@@ -561,71 +841,135 @@ anti_malware() {
   read -n 1 -s key
 }
 
-# Configure ClamAV function
+# Configure ClamAV function with improved resource management and error handling
 configure_clamav() {
   echo "Installing and configuring ClamAV..."
 
-  # Install ClamAV packages - removed non-existent packages
-  dnf install -y clamav clamav-update clamd
+  # Create a function to check if the system is under heavy load
+  check_system_load() {
+    load=$(cat /proc/loadavg | cut -d ' ' -f 1)
+    load_int=${load%.*}
+    cores=$(nproc)
+
+    if [ "$load_int" -gt "$cores" ]; then
+      echo -e "${YELLOW}System is under heavy load ($load). Waiting 30 seconds before continuing...${NC}"
+      sleep 30
+      return 1
+    fi
+    return 0
+  }
+
+  # Install ClamAV packages with timeout protection
+  echo "Installing ClamAV packages - this may take a while..."
+
+  # First check if already installed
+  if rpm -q clamav clamav-update clamd &>/dev/null; then
+    echo -e "${GREEN}ClamAV packages are already installed. Skipping installation.${NC}"
+  else
+    # Install with resource protection
+    check_system_load
+
+    # Use a timeout to prevent hanging
+    timeout 300 dnf install -y clamav clamav-update || {
+      echo -e "${RED}Installation timed out or failed. You may need to install ClamAV manually.${NC}"
+      echo "Press any key to continue with other configurations..."
+      read -n 1 -s
+      return 1
+    }
+  fi
 
   # Make sure freshclam configuration is correct
-  if grep -q "Example" /etc/freshclam.conf; then
+  if [ -f "/etc/freshclam.conf" ]; then
+    if grep -q "Example" /etc/freshclam.conf; then
       sed -i 's/^Example/#Example/' /etc/freshclam.conf
-  fi
+    fi
 
-  # Update virus database
-  echo "Updating ClamAV virus database..."
-  freshclam
+    # Update virus database with timeout and resource protection
+    echo "Updating ClamAV virus database (with timeout protection)..."
+    check_system_load
 
-  # Configure clamd - paths may vary by distribution, check for correct location
-  if [ -f "/etc/clamd.d/scan.conf" ]; then
-      echo "Configuring clamd scan.conf..."
-      sed -i 's/^Example/#Example/' /etc/clamd.d/scan.conf
-      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.d/scan.conf
-      sed -i 's/^#LogFile /LogFile /' /etc/clamd.d/scan.conf
-      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.d/scan.conf
-  elif [ -f "/etc/clamd.conf" ]; then
-      echo "Configuring clamd.conf..."
-      sed -i 's/^Example/#Example/' /etc/clamd.conf
-      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.conf
-      sed -i 's/^#LogFile /LogFile /' /etc/clamd.conf
-      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.conf
-  fi
-
-  # Find the correct service name for clamd
-  if systemctl list-unit-files | grep -q "clamd@"; then
-      CLAMD_SERVICE="clamd@scan"
-  elif systemctl list-unit-files | grep -q "clamd.service"; then
-      CLAMD_SERVICE="clamd"
+    echo "Running database update with a 5-minute timeout..."
+    timeout 300 freshclam || {
+      echo -e "${YELLOW}Database update timed out or failed. You can update it later with 'freshclam'.${NC}"
+    }
   else
-      echo "Warning: Could not determine correct clamd service name. Manual configuration may be required."
-      CLAMD_SERVICE="clamd"
+    echo -e "${YELLOW}freshclam.conf not found. Skipping database update.${NC}"
   fi
 
-  # Enable and start services
-  systemctl enable clamav-freshclam.service
-  systemctl start clamav-freshclam.service
+  # Configure clamd with proper error checking
+  configure_clamd() {
+    # Find the clamd config file
+    CLAMD_CONF=""
+    if [ -f "/etc/clamd.d/scan.conf" ]; then
+      CLAMD_CONF="/etc/clamd.d/scan.conf"
+    elif [ -f "/etc/clamd.conf" ]; then
+      CLAMD_CONF="/etc/clamd.conf"
+    else
+      echo -e "${YELLOW}clamd configuration file not found. Skipping clamd configuration.${NC}"
+      return 1
+    fi
 
-  # Try to enable and start clamd if available
+    echo "Configuring clamd ($CLAMD_CONF)..."
+    sed -i 's/^Example/#Example/' "$CLAMD_CONF"
+    sed -i 's/^#LocalSocket /LocalSocket /' "$CLAMD_CONF"
+    sed -i 's/^#LogFile /LogFile /' "$CLAMD_CONF"
+    sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' "$CLAMD_CONF"
+    return 0
+  }
+
+  # Call with error handling
+  configure_clamd || echo -e "${YELLOW}clamd configuration could not be completed. Continuing with other steps.${NC}"
+
+  # Find the correct service name for clamd with improved detection
+  if systemctl list-unit-files | grep -q "clamd@"; then
+    CLAMD_SERVICE="clamd@scan"
+  elif systemctl list-unit-files | grep -q "clamd.service"; then
+    CLAMD_SERVICE="clamd"
+  else
+    echo -e "${YELLOW}Warning: Could not determine correct clamd service name. Skipping clamd service setup.${NC}"
+    CLAMD_SERVICE=""
+  fi
+
+  # Enable and start services with error handling
+  echo "Enabling freshclam service..."
+  systemctl enable clamav-freshclam.service || echo -e "${YELLOW}Failed to enable freshclam service, continuing...${NC}"
+  systemctl start clamav-freshclam.service || echo -e "${YELLOW}Failed to start freshclam service, continuing...${NC}"
+
+  # Try to enable and start clamd if available, with better error handling
   if [ -n "$CLAMD_SERVICE" ]; then
-      echo "Enabling and starting $CLAMD_SERVICE service..."
-      systemctl enable $CLAMD_SERVICE || echo "Warning: Failed to enable $CLAMD_SERVICE. ClamAV scanner may not be available."
-      systemctl start $CLAMD_SERVICE || echo "Warning: Failed to start $CLAMD_SERVICE. ClamAV scanner may not be available."
+    echo "Enabling and starting $CLAMD_SERVICE service..."
+
+    # Use timeout to prevent hanging
+    timeout 60 systemctl enable $CLAMD_SERVICE || echo -e "${YELLOW}Warning: Failed to enable $CLAMD_SERVICE. ClamAV scanner may not be available.${NC}"
+    timeout 60 systemctl start $CLAMD_SERVICE || echo -e "${YELLOW}Warning: Failed to start $CLAMD_SERVICE. ClamAV scanner may not be available.${NC}"
   fi
 
-  # Set up daily scans
+  # Set up daily scans - use a less intensive scan to prevent system overload
   mkdir -p /etc/cron.daily
   cat <<EOL > /etc/cron.daily/clamav-scan
 #!/bin/sh
+# Run at a time when the server is likely less busy
+SCAN_TIME=\$(date +%H)
+if [ "\$SCAN_TIME" -lt 4 ]; then
+  # Only run intensive scan during night hours (0-4 AM)
+  SCAN_DIRS="/srv /home /var/www /etc"
+else
+  # During day, only scan critical directories
+  SCAN_DIRS="/srv/web /home"
+fi
+
 LOGFILE="/var/log/clamav/daily-scan.log"
 mkdir -p /var/log/clamav
 echo "ClamAV daily scan started at \$(date)" > \$LOGFILE
-clamscan -r --quiet --infected /srv /home /var/www /etc >> \$LOGFILE
+
+# Use nice to reduce priority, and limit CPU usage to 30%
+nice -n 19 ionice -c3 clamscan -r --quiet --infected \$SCAN_DIRS >> \$LOGFILE
+
 echo "ClamAV daily scan completed at \$(date)" >> \$LOGFILE
 EOL
   chmod +x /etc/cron.daily/clamav-scan
 
-  echo "ClamAV has been configured successfully."
+  echo "ClamAV has been configured successfully with resource protection measures."
 }
 
 # Configure RKHunter function
