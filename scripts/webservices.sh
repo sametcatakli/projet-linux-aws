@@ -383,67 +383,163 @@ basic_db() {
 
   # Install phpMyAdmin
   echo "Installing phpMyAdmin..."
-  dnf -y install phpMyAdmin || {
+  dnf -y install phpMyAdmin php-mbstring php-zip php-gd php-json php-mysqli || {
       echo "phpMyAdmin not available in default repositories."
       echo "You may need to install it manually later."
+      echo "Press any key to continue..."
+      read -n 1 -s key
+      return 1
   }
 
   # Configure phpMyAdmin if installed
   if [ -d "/usr/share/phpMyAdmin" ]; then
       echo "Configuring phpMyAdmin..."
 
-      # Create phpMyAdmin directory in web root
-      mkdir -p /srv/web/root
+      # Create a dedicated directory for phpMyAdmin
+      mkdir -p /srv/web/phpmyadmin
 
-      # Create symlink to phpMyAdmin
-      ln -sf /usr/share/phpMyAdmin /srv/web/root/phpmyadmin
+      # Set up DNS entry for phpmyadmin subdomain
+      echo "Adding DNS entry for phpmyadmin.$DOMAIN_NAME..."
 
-      # Configure phpMyAdmin
-      conf_file="/etc/httpd/conf.d/phpMyAdmin.conf"
+      # Check if the forward.$DOMAIN_NAME file exists
+      if [ -f "/var/named/forward.$DOMAIN_NAME" ]; then
+          # Check if the entry already exists
+          if ! grep -q "phpmyadmin" "/var/named/forward.$DOMAIN_NAME"; then
+              # Add the phpmyadmin subdomain to DNS
+              sed -i "/^ns /a phpmyadmin      IN  A       $(hostname -I | awk '{print $1}')" "/var/named/forward.$DOMAIN_NAME"
+              # Increment the serial number in the SOA record
+              serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
+              new_serial=$((serial + 1))
+              sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
+              # Reload named service
+              systemctl reload named
+              echo "DNS entry for phpmyadmin.$DOMAIN_NAME added successfully."
+          else
+              echo "DNS entry for phpmyadmin.$DOMAIN_NAME already exists."
+          fi
+      else
+          echo "WARNING: Forward DNS zone file not found. Skipping DNS configuration."
+      fi
 
-cat <<EOL > $conf_file
-# phpMyAdmin - Web based MySQL browser written in php
-Alias /phpmyadmin /usr/share/phpMyAdmin
+      # Configure virtual host for phpMyAdmin
+      echo "Setting up dedicated virtual host for phpMyAdmin..."
+      cat <<EOL > /etc/httpd/conf.d/phpmyadmin.conf
+<VirtualHost *:80>
+    ServerName phpmyadmin.$DOMAIN_NAME
+    Redirect permanent / https://phpmyadmin.$DOMAIN_NAME/
+</VirtualHost>
 
-<Directory /usr/share/phpMyAdmin/>
-    AddDefaultCharset UTF-8
-    Require all granted
-</Directory>
+<VirtualHost *:443>
+    ServerName phpmyadmin.$DOMAIN_NAME
+    DocumentRoot /usr/share/phpMyAdmin
 
-<Directory /usr/share/phpMyAdmin/setup/>
-   Require local
-</Directory>
+    <Directory /usr/share/phpMyAdmin/>
+        AddDefaultCharset UTF-8
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
 
-<Directory /usr/share/phpMyAdmin/libraries/>
-    Require all denied
-</Directory>
+        # Block root user access
+        <IfModule mod_rewrite.c>
+            RewriteEngine On
+            RewriteCond %{REQUEST_URI} ^/.*
+            RewriteCond %{REQUEST_METHOD} ^POST$
+            RewriteCond %{REQUEST_URI} !server-status
+            RewriteCond %{THE_REQUEST} pma_username=root [NC]
+            RewriteRule .* - [F,L]
+        </IfModule>
+    </Directory>
 
-<Directory /usr/share/phpMyAdmin/templates/>
-    Require all denied
-</Directory>
+    <Directory /usr/share/phpMyAdmin/setup/>
+        Require local
+    </Directory>
+
+    <Directory /usr/share/phpMyAdmin/libraries/>
+        Require all denied
+    </Directory>
+
+    <Directory /usr/share/phpMyAdmin/templates/>
+        Require all denied
+    </Directory>
+
+    SSLEngine on
+    SSLCertificateFile /etc/httpd/ssl/$DOMAIN_NAME.crt
+    SSLCertificateKeyFile /etc/httpd/ssl/$DOMAIN_NAME.key
+
+    ErrorLog /var/log/httpd/phpmyadmin_error.log
+    CustomLog /var/log/httpd/phpmyadmin_access.log combined
+</VirtualHost>
 EOL
+
+      # Configure phpMyAdmin security settings
+      echo "Configuring phpMyAdmin security settings..."
+
+      # Create custom config file
+      mkdir -p /etc/phpMyAdmin/
+      cat <<EOL > /etc/phpMyAdmin/config.inc.php
+<?php
+\$cfg['blowfish_secret'] = '$(openssl rand -hex 16)';
+\$cfg['Servers'][1]['auth_type'] = 'cookie';
+\$cfg['Servers'][1]['host'] = 'localhost';
+\$cfg['Servers'][1]['compress'] = false;
+\$cfg['Servers'][1]['AllowNoPassword'] = false;
+\$cfg['Servers'][1]['AllowRoot'] = false; /* Disable root access */
+\$cfg['DefaultLang'] = 'en';
+\$cfg['ServerDefault'] = 1;
+\$cfg['UploadDir'] = '';
+\$cfg['SaveDir'] = '';
+?>
+EOL
+
+      # Set proper ownership and permissions
+      chown apache:apache /etc/phpMyAdmin/config.inc.php
+      chmod 640 /etc/phpMyAdmin/config.inc.php
 
       # Set up SELinux context for phpMyAdmin if SELinux is enabled
       if command -v sestatus &> /dev/null && sestatus | grep -q "enabled"; then
           echo "Setting SELinux context for phpMyAdmin..."
           semanage fcontext -a -t httpd_sys_content_t "/usr/share/phpMyAdmin(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
           restorecon -Rv /usr/share/phpMyAdmin || echo "SELinux context restoration failed, continuing anyway..."
+          semanage fcontext -a -t httpd_sys_rw_content_t "/usr/share/phpMyAdmin/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
+          restorecon -Rv /usr/share/phpMyAdmin/tmp || echo "SELinux context restoration failed, continuing anyway..."
       fi
 
-      # Create index.php with link to phpMyAdmin
-      mkdir -p /srv/web/root
-      echo "<html><body><h1>PHPMyAdmin installed. <a href='/phpmyadmin'>Access it here</a></h1></body></html>" > /srv/web/root/index.php
+      # Create a non-root admin user for database management
+      echo "Creating a non-root admin user for database management..."
+      ADMIN_USER="dbadmin"
+      ADMIN_PASS=$(openssl rand -base64 12)
+
+      # Create the admin user with all privileges except grant
+      mysql -u root -prootpassword -e "
+      CREATE USER IF NOT EXISTS '$ADMIN_USER'@'localhost' IDENTIFIED BY '$ADMIN_PASS';
+      GRANT ALL PRIVILEGES ON *.* TO '$ADMIN_USER'@'localhost' WITH GRANT OPTION;
+      FLUSH PRIVILEGES;
+      " || {
+          echo -e "${RED}Failed to create admin user.${NC}"
+      }
+
+      echo -e "${GREEN}Created database admin user: $ADMIN_USER with password: $ADMIN_PASS${NC}"
+      echo -e "${GREEN}IMPORTANT: Save these credentials securely!${NC}"
+      echo -e "Username: $ADMIN_USER"
+      echo -e "Password: $ADMIN_PASS"
+      echo -e "${YELLOW}NOTE: Root login to phpMyAdmin has been disabled for security. Use the admin user above.${NC}"
+
+      # Link to main page
+      echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1><p>Access phpMyAdmin at <a href='https://phpmyadmin.$DOMAIN_NAME'>https://phpmyadmin.$DOMAIN_NAME</a></p></body></html>" > /srv/web/root/index.php
 
       echo "phpMyAdmin configuration complete."
   else
       echo "WARNING: phpMyAdmin directory not found. Skipping phpMyAdmin configuration."
       # Create a basic index.php file
       mkdir -p /srv/web/root
-      echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1></body></html>" > /srv/web/root/index.php
+      echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1><p>phpMyAdmin installation failed.</p></body></html>" > /srv/web/root/index.php
   fi
 
   # Restart Apache
   systemctl restart httpd
 
   echo "Database web frontend setup completed successfully."
+  echo "phpMyAdmin is now accessible at https://phpmyadmin.$DOMAIN_NAME"
+  echo "Root access to phpMyAdmin has been disabled for security."
+  echo "Use the created admin user credentials instead."
 }
