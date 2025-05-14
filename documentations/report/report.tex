@@ -1,0 +1,201 @@
+\documentclass[a4paper, 12pt]{article}
+\usepackage[french]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz} % For precise background positioning
+\usepackage{eso-pic} % For adding content to every page
+\usepackage{array}
+\renewcommand{\arraystretch}{1.5} % Increases row height
+
+
+% Correction pour l'erreur de headheight
+\setlength{\headheight}{14.5pt}
+
+\setlist[itemize]{label=\textbullet}
+
+% Configuration de la page
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+% Style des titres
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+% Style des listings
+\lstset{
+	basicstyle=\ttfamily\small,
+	breaklines=true,
+	frame=single,
+	backgroundcolor=\color{gray!10},
+	keywordstyle=\color{blue},
+	commentstyle=\color{green!50!black},
+	stringstyle=\color{red},
+	showstringspaces=false,
+	literate=
+	{é}{{\'e}}1
+	{è}{{\`e}}1
+	{ê}{{\^e}}1
+	{ë}{{\"e}}1
+	{É}{{\'E}}1
+	{Ê}{{\^E}}1
+	{à}{{\`a}}1
+	{â}{{\^a}}1
+	{ç}{{\c c}}1
+	{Ç}{{\c C}}1
+	{ù}{{\`u}}1
+	{û}{{\^u}}1
+}
+
+% Add FWB logo to every page
+\AddToShipoutPictureBG{%
+	\begin{tikzpicture}[remember picture,overlay]
+		\node[anchor=south east, xshift=-2.5cm, yshift=1cm] at (current page.south east)
+		{\includegraphics[width=0.3\textwidth]{fwb.png}};
+	\end{tikzpicture}%
+	\begin{tikzpicture}[remember picture,overlay]
+		\node[anchor=south west, xshift=2.5cm, yshift=0.75cm] at (current page.south west)
+		{\includegraphics[width=0.2\textwidth]{logo.png}};
+	\end{tikzpicture}%
+	\begin{tikzpicture}[remember picture,overlay]
+		\node[anchor=south west, xshift=1cm, yshift=1cm] at (current page.south west)
+		{\includegraphics[width=0.02\textwidth]{side.png}};
+	\end{tikzpicture}%
+}
+
+% En-tête et pied de page
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\thepage}
+\lhead{Projet Linux}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Page de garde
+\title{}
+\author{}
+\date{}
+
+% Custom title page with background image
+\renewcommand{\maketitle}{%
+	\begin{titlepage}
+		% Background image
+		\begin{tikzpicture}[remember picture,overlay]
+			\node[anchor=north west, inner sep=0pt] at (current page.north west)
+			{\includegraphics[width=\paperwidth]{entete.png}};
+		\end{tikzpicture}
+		
+		% Content with proper vertical spacing
+		\null  % Needed to start a new paragraph
+		\vspace*{7cm} % Adjust this value to position your content lower
+		
+		\centering
+		\vspace{0.5cm}
+		{\LARGE\textbf{Projet Linux} \\}
+		\vspace{0.5cm}
+		{\large Rapport Final \\}
+		
+		\vspace{10cm}
+		
+		\begin{flushright} % Left alignment for the following content
+			\textbf{Année Académique} \\
+			2024 - 2025 \\
+			\vspace{0.5cm}
+			\textbf{Membres} \\
+			Adam Bougma \\
+			Samet Catakli \\
+			
+		\end{flushright}
+	\end{titlepage}
+}
+
+\begin{document}
+	% Page de garde
+	\maketitle
+	\thispagestyle{empty}
+	\newpage
+	
+	% Table des matières
+	\tableofcontents
+	\thispagestyle{empty}
+	\newpage
+	
+	% Corps du document
+	\setcounter{page}{1}
+	
+	\section{Introduction}
+	
+Ce projet consiste à configurer et déployer des services sur des serveurs Linux dans l'infrastructure AWS. L'objectif est d'acquérir des compétences pratiques en gestion de serveurs, automatisation, sécurité des services et gestion réseau.
+
+	\section{Présentation générale du projet}
+	
+	Ce projet, réalisé dans le cadre de l'année académique 2024-2025, consiste à déployer et configurer divers services sur des serveurs Linux, hébergés dans une infrastructure cloud AWS. L'objectif principal est d'acquérir une expérience pratique en administration de serveurs, en gestion de réseau et en sécurité informatique. À travers ce projet, les étudiants seront amenés à gérer la configuration de serveurs web, bases de données, partage de fichiers et plus encore, tout en mettant en œuvre des pratiques d'automatisation et de sécurisation des services.
+	
+	Les services à déployer incluent le partage de fichiers avec NFS et Samba, la gestion de bases de données isolées, un serveur web pour chaque utilisateur, ainsi qu'une surveillance des serveurs via des outils dédiés. Le projet met également l'accent sur la sécurité du réseau, en utilisant des outils tels que SSH sécurisé, pare-feux et SELinux. Ce projet permettra aux étudiants de travailler en équipe et d’acquérir des compétences techniques sur des solutions largement utilisées dans l’industrie.
+	
+	\section{Choix de distribution \& type d'installation}
+	
+	Pour ce projet, la distribution Linux choisie est \texttt{Amazon Linux}, en raison de sa stabilité, de sa documentation complète et de sa large adoption dans l'environnement de production. \texttt{Ubuntu Server} permet une installation facile et une configuration rapide grâce à une grande communauté et une riche base de ressources.
+	
+	L'installation des serveurs se fera sur des machines virtuelles, déployées dans le cloud AWS (Amazon Web Services), offrant ainsi une flexibilité optimale et une gestion simplifiée des ressources. Les installations seront réalisées en ligne de commande, permettant de configurer chaque service de manière précise et de suivre les meilleures pratiques d'administration système. Une fois les serveurs configurés, des scripts d'automatisation seront utilisés pour déployer les services et assurer leur maintenance.
+	
+	\section{Plan de partitionnement}
+	
+	Le plan de partitionnement des serveurs est conçu pour assurer une gestion efficace des ressources et garantir une sécurité optimale. Chaque serveur sera partitionné avec les critères suivants :
+	
+	\begin{itemize}
+		\item \textbf{Partition racine (\texttt{/}) :} Contiendra le système d'exploitation et les fichiers de configuration de base. Sa taille sera ajustée en fonction des besoins spécifiques de chaque service.
+		\item \textbf{Partition \texttt{/home} :} Cette partition stockera les données utilisateurs, permettant une gestion centralisée des espaces de travail. Elle sera dimensionnée en fonction du nombre d'utilisateurs et de la quantité de données prévues.
+		\item \textbf{Partition \texttt{/var} :} La partition \texttt{/var} contiendra les fichiers de log, les bases de données et les fichiers temporaires. Elle sera configurée pour éviter l'encombrement de la partition racine, avec une capacité suffisante pour accueillir les données dynamiques.
+		\item \textbf{Partition \texttt{/srv} :} Cette partition hébergera les données relatives aux services web et aux bases de données. Elle sera partitionnée en fonction de l'espace nécessaire pour chaque utilisateur et service.
+		\item \textbf{Swap :} Un espace d'échange \texttt{swap} sera configuré pour améliorer les performances du serveur, notamment dans les situations où la mémoire vive est saturée. La taille sera déterminée en fonction de la capacité de la mémoire RAM.
+	\end{itemize}
+	
+	Ce plan de partitionnement vise à séparer les différents types de données pour garantir la performance et la sécurité du serveur, tout en facilitant la gestion des ressources.
+	
+	\section{Descriptions des services}
+	
+	\subsection{Partage de Dossier avec NFS et Samba}
+	Le partage de fichiers est un service essentiel permettant aux utilisateurs de partager des ressources sans nécessiter une authentification complexe. NFS sera utilisé pour l'échange de fichiers entre serveurs Linux, tandis que Samba permettra une compatibilité avec les systèmes Windows. Chaque utilisateur pourra accéder à son espace de travail depuis les différentes machines, assurant ainsi une grande flexibilité dans la gestion des fichiers partagés.
+	
+	\subsection{Connexion SSH Sécurisée}
+	La connexion SSH est utilisée pour assurer un accès sécurisé à distance aux serveurs. Les connexions SSH sont configurées avec des clés publiques et privées pour renforcer la sécurité. Le protocole SSH permet de chiffrer les communications, garantissant ainsi l'intégrité et la confidentialité des données échangées entre l'administrateur et le serveur.
+	
+	\subsection{Serveur Web}
+	Chaque utilisateur disposera de son propre serveur web, installé sur un serveur dédié. Le serveur web, tel qu'Apache ou Nginx, permettra d'héberger les sites des utilisateurs avec une gestion personnalisée des fichiers. Des certificats SSL seront installés pour assurer la sécurité des échanges HTTPS.
+	
+	\subsection{Base de Données}
+	Pour chaque utilisateur, une base de données sera déployée, permettant une gestion indépendante des données. Les systèmes de gestion de bases de données tels que MySQL ou PostgreSQL seront utilisés, en fonction des besoins spécifiques de chaque utilisateur. Ces bases de données seront isolées et configurées automatiquement à l'aide de scripts.
+	
+	\subsection{Automatisation des Configurations}
+	L'automatisation des configurations est un pilier de ce projet. Des scripts seront utilisés pour déployer les services sur les serveurs, automatiser la création des utilisateurs, la configuration des services et l'installation des logiciels nécessaires. Cette approche permettra de garantir la consistance et la fiabilité de l'environnement déployé.
+	
+	\subsection{Monitoring}
+	Un système de surveillance des serveurs sera mis en place pour assurer le suivi en temps réel des performances et de la disponibilité des services. Des outils comme Nagios ou Zabbix seront utilisés pour surveiller les métriques système (utilisation du CPU, mémoire, espace disque) ainsi que la disponibilité des services web, FTP et base de données.
+	
+	\subsection{Serveur NTP}
+	Un serveur NTP sera déployé pour synchroniser l'heure sur tous les serveurs et machines clientes du réseau. Cette synchronisation est essentielle pour garantir la cohérence des logs et assurer une gestion précise des tâches planifiées.
+	
+	\subsection{Serveur DNS}
+	Le serveur DNS sera responsable de la résolution des noms de domaine internes et permettra la gestion des zones DNS. Il assurera une gestion rapide des requêtes DNS internes, tout en étant configuré en tant que serveur maître pour sa zone, avec la gestion d'une zone inverse pour la résolution des adresses IP.
+	
+	
+	\section{Descriptions des scripts}
+	
+	\section{Plan de sauvegarde}
+	
+	\section{Sécurité du serveur}
+	
+	\section{Problèmes rencontrés}
+	
+	\section{Améliorations et conclusions}
+	
+	\section{Bibliographie}
+	
+	\section{Annexes}
+\end{document}
