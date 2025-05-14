@@ -299,7 +299,7 @@ basic_web_setup() {
 # Basic root website function
 basic_root_website() {
   DOMAIN_NAME=$1
-  dnf -y install httpd mod_ssl
+  dnf -y install httpd mod_ssl php php-json php-mysqli php-mbstring php-zip php-gd
   mkdir -p /srv/web/root
   echo "<html><body><h1>Welcome to $DOMAIN_NAME</h1></body></html>" > /srv/web/root/index.php
   chown -R apache:apache /srv/web/root
@@ -359,7 +359,7 @@ EOL
   echo "Verifying HTTP Access..."
   curl -I http://$DOMAIN_NAME
   echo "Verifying HTTPS Access..."
-  curl -I https://$DOMAIN_NAME
+  curl -I --insecure https://$DOMAIN_NAME
 }
 
 # Basic DB function
@@ -381,49 +381,81 @@ basic_db() {
       firewall-cmd --reload || echo "Firewall reload failed, continuing anyway..."
   fi
 
-  # Install phpMyAdmin
-  echo "Installing phpMyAdmin..."
-  dnf -y install phpMyAdmin php-mbstring php-zip php-gd php-json php-mysqli || {
-      echo "phpMyAdmin not available in default repositories."
-      echo "You may need to install it manually later."
+  # Install phpMyAdmin manually from source
+  echo "Installing phpMyAdmin from source..."
+
+  # Create directory for phpMyAdmin
+  mkdir -p /srv/web/phpmyadmin
+
+  # Download latest phpMyAdmin
+  echo "Downloading latest phpMyAdmin..."
+  cd /tmp
+  wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz || {
+      echo -e "${RED}Failed to download phpMyAdmin. Check your internet connection.${NC}"
       echo "Press any key to continue..."
       read -n 1 -s key
       return 1
   }
 
-  # Configure phpMyAdmin if installed
-  if [ -d "/usr/share/phpMyAdmin" ]; then
-      echo "Configuring phpMyAdmin..."
+  # Extract the archive
+  echo "Extracting phpMyAdmin..."
+  tar -xzf phpMyAdmin-latest-all-languages.tar.gz || {
+      echo -e "${RED}Failed to extract phpMyAdmin archive.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s key
+      return 1
+  }
 
-      # Create a dedicated directory for phpMyAdmin
-      mkdir -p /srv/web/phpmyadmin
+  # Move to web directory
+  PMA_DIR=$(find . -maxdepth 1 -type d -name "phpMyAdmin-*" -print | head -n 1)
+  if [ -z "$PMA_DIR" ]; then
+      echo -e "${RED}Failed to find phpMyAdmin directory after extraction.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s key
+      return 1
+  fi
 
-      # Set up DNS entry for phpmyadmin subdomain
-      echo "Adding DNS entry for phpmyadmin.$DOMAIN_NAME..."
+  # Move to the proper location
+  mv $PMA_DIR /srv/web/phpmyadmin || {
+      echo -e "${RED}Failed to move phpMyAdmin to web directory.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s key
+      return 1
+  }
 
-      # Check if the forward.$DOMAIN_NAME file exists
-      if [ -f "/var/named/forward.$DOMAIN_NAME" ]; then
-          # Check if the entry already exists
-          if ! grep -q "phpmyadmin" "/var/named/forward.$DOMAIN_NAME"; then
-              # Add the phpmyadmin subdomain to DNS
-              sed -i "/^ns /a phpmyadmin      IN  A       $(hostname -I | awk '{print $1}')" "/var/named/forward.$DOMAIN_NAME"
-              # Increment the serial number in the SOA record
-              serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
-              new_serial=$((serial + 1))
-              sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
-              # Reload named service
-              systemctl reload named
-              echo "DNS entry for phpmyadmin.$DOMAIN_NAME added successfully."
-          else
-              echo "DNS entry for phpmyadmin.$DOMAIN_NAME already exists."
-          fi
+  # Remove the archive
+  rm -f phpMyAdmin-latest-all-languages.tar.gz
+
+  # Set proper ownership and permissions
+  chown -R apache:apache /srv/web/phpmyadmin
+  chmod -R 755 /srv/web/phpmyadmin
+
+  # Set up DNS entry for phpmyadmin subdomain
+  echo "Adding DNS entry for phpmyadmin.$DOMAIN_NAME..."
+
+  # Check if the forward.$DOMAIN_NAME file exists
+  if [ -f "/var/named/forward.$DOMAIN_NAME" ]; then
+      # Check if the entry already exists
+      if ! grep -q "phpmyadmin" "/var/named/forward.$DOMAIN_NAME"; then
+          # Add the phpmyadmin subdomain to DNS
+          sed -i "/^ns /a phpmyadmin      IN  A       $IP_ADDRESS" "/var/named/forward.$DOMAIN_NAME"
+          # Increment the serial number in the SOA record
+          serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
+          new_serial=$((serial + 1))
+          sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
+          # Reload named service
+          systemctl reload named
+          echo "DNS entry for phpmyadmin.$DOMAIN_NAME added successfully."
       else
-          echo "WARNING: Forward DNS zone file not found. Skipping DNS configuration."
+          echo "DNS entry for phpmyadmin.$DOMAIN_NAME already exists."
       fi
+  else
+      echo "WARNING: Forward DNS zone file not found. Skipping DNS configuration."
+  fi
 
-      # Configure virtual host for phpMyAdmin
-      echo "Setting up dedicated virtual host for phpMyAdmin..."
-      cat <<EOL > /etc/httpd/conf.d/phpmyadmin.conf
+  # Configure virtual host for phpMyAdmin
+  echo "Setting up dedicated virtual host for phpMyAdmin..."
+  cat <<EOL > /etc/httpd/conf.d/phpmyadmin.conf
 <VirtualHost *:80>
     ServerName phpmyadmin.$DOMAIN_NAME
     Redirect permanent / https://phpmyadmin.$DOMAIN_NAME/
@@ -431,9 +463,9 @@ basic_db() {
 
 <VirtualHost *:443>
     ServerName phpmyadmin.$DOMAIN_NAME
-    DocumentRoot /usr/share/phpMyAdmin
+    DocumentRoot /srv/web/phpmyadmin
 
-    <Directory /usr/share/phpMyAdmin/>
+    <Directory /srv/web/phpmyadmin/>
         AddDefaultCharset UTF-8
         Options FollowSymLinks
         AllowOverride All
@@ -450,15 +482,15 @@ basic_db() {
         </IfModule>
     </Directory>
 
-    <Directory /usr/share/phpMyAdmin/setup/>
+    <Directory /srv/web/phpmyadmin/setup/>
         Require local
     </Directory>
 
-    <Directory /usr/share/phpMyAdmin/libraries/>
+    <Directory /srv/web/phpmyadmin/libraries/>
         Require all denied
     </Directory>
 
-    <Directory /usr/share/phpMyAdmin/templates/>
+    <Directory /srv/web/phpmyadmin/templates/>
         Require all denied
     </Directory>
 
@@ -471,69 +503,207 @@ basic_db() {
 </VirtualHost>
 EOL
 
-      # Configure phpMyAdmin security settings
-      echo "Configuring phpMyAdmin security settings..."
+  # Configure phpMyAdmin security settings
+  echo "Configuring phpMyAdmin security settings..."
 
-      # Create custom config file
-      mkdir -p /etc/phpMyAdmin/
-      cat <<EOL > /etc/phpMyAdmin/config.inc.php
+  # Create configuration directory if it doesn't exist
+  mkdir -p /srv/web/phpmyadmin/config
+
+  # Generate blowfish secret
+  BLOWFISH_SECRET=$(openssl rand -hex 16)
+
+  # Create config.inc.php file
+  cat > /srv/web/phpmyadmin/config.inc.php <<EOL
 <?php
-\$cfg['blowfish_secret'] = '$(openssl rand -hex 16)';
-\$cfg['Servers'][1]['auth_type'] = 'cookie';
-\$cfg['Servers'][1]['host'] = 'localhost';
-\$cfg['Servers'][1]['compress'] = false;
-\$cfg['Servers'][1]['AllowNoPassword'] = false;
-\$cfg['Servers'][1]['AllowRoot'] = false; /* Disable root access */
-\$cfg['DefaultLang'] = 'en';
-\$cfg['ServerDefault'] = 1;
+/**
+ * phpMyAdmin configuration file
+ */
+
+/**
+ * This is needed for cookie based authentication to encrypt password in
+ * cookie. Needs to be 32 chars long.
+ */
+\$cfg['blowfish_secret'] = '${BLOWFISH_SECRET}';
+
+/**
+ * Servers configuration
+ */
+\$i = 0;
+
+/**
+ * First server
+ */
+\$i++;
+/* Authentication type */
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+/* Server parameters */
+\$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+\$cfg['Servers'][\$i]['AllowRoot'] = false; /* Disable root access */
+
+/**
+ * phpMyAdmin configuration storage settings.
+ */
+
+/* User used to manipulate with storage */
+// \$cfg['Servers'][\$i]['controlhost'] = '';
+// \$cfg['Servers'][\$i]['controlport'] = '';
+// \$cfg['Servers'][\$i]['controluser'] = 'pma';
+// \$cfg['Servers'][\$i]['controlpass'] = 'pmapass';
+
+/* Storage database and tables */
+// \$cfg['Servers'][\$i]['pmadb'] = 'phpmyadmin';
+// \$cfg['Servers'][\$i]['bookmarktable'] = 'pma__bookmark';
+// \$cfg['Servers'][\$i]['relation'] = 'pma__relation';
+// \$cfg['Servers'][\$i]['table_info'] = 'pma__table_info';
+// \$cfg['Servers'][\$i]['table_coords'] = 'pma__table_coords';
+// \$cfg['Servers'][\$i]['pdf_pages'] = 'pma__pdf_pages';
+// \$cfg['Servers'][\$i]['column_info'] = 'pma__column_info';
+// \$cfg['Servers'][\$i]['history'] = 'pma__history';
+// \$cfg['Servers'][\$i]['table_uiprefs'] = 'pma__table_uiprefs';
+// \$cfg['Servers'][\$i]['tracking'] = 'pma__tracking';
+// \$cfg['Servers'][\$i]['userconfig'] = 'pma__userconfig';
+// \$cfg['Servers'][\$i]['recent'] = 'pma__recent';
+// \$cfg['Servers'][\$i]['favorite'] = 'pma__favorite';
+// \$cfg['Servers'][\$i]['users'] = 'pma__users';
+// \$cfg['Servers'][\$i]['usergroups'] = 'pma__usergroups';
+// \$cfg['Servers'][\$i]['navigationhiding'] = 'pma__navigationhiding';
+// \$cfg['Servers'][\$i]['savedsearches'] = 'pma__savedsearches';
+// \$cfg['Servers'][\$i]['central_columns'] = 'pma__central_columns';
+// \$cfg['Servers'][\$i]['designer_settings'] = 'pma__designer_settings';
+// \$cfg['Servers'][\$i]['export_templates'] = 'pma__export_templates';
+
+/**
+ * End of servers configuration
+ */
+
+/**
+ * Directories for saving/loading files from server
+ */
 \$cfg['UploadDir'] = '';
 \$cfg['SaveDir'] = '';
+
+/**
+ * Default Theme
+ */
+\$cfg['ThemeDefault'] = 'pmahomme';
+
+/**
+ * Whether to display icons or text or both icons and text in table row
+ * action segment. Value can be either of 'icons', 'text' or 'both'.
+ * default = 'both'
+ */
+\$cfg['RowActionType'] = 'icons';
+
+/**
+ * Defines whether a user should be displayed a "show all (records)"
+ * button in browse mode or not.
+ * default = false
+ */
+\$cfg['ShowAll'] = true;
+
+/**
+ * Number of rows displayed when browsing a result set. If the result
+ * set contains more rows, "Previous" and "Next".
+ * Possible values: 25, 50, 100, 250, 500
+ * default = 25
+ */
+\$cfg['MaxRows'] = 50;
+
+/**
+ * Disallow editing of binary fields
+ * valid values are:
+ *   false    allow editing
+ *   'blob'   allow editing except for BLOB fields
+ *   'noblob' disallow editing except for BLOB fields
+ *   'all'    disallow editing
+ * default = 'blob'
+ */
+\$cfg['ProtectBinary'] = false;
+
+/**
+ * Default language to use, if not browser-defined or user-defined
+ * (you find all languages in the locale folder)
+ * uncomment the desired line:
+ * default = 'en'
+ */
+\$cfg['DefaultLang'] = 'en';
+
+/**
+ * How many columns should be used for table display of a database?
+ * (a value larger than 1 results in some information being hidden)
+ * default = 1
+ */
+\$cfg['PropertiesNumColumns'] = 1;
+
+/**
+ * Set to true if you want DB-based query history.If false, this utilizes
+ * JS-routines to display query history (lost by window close)
+ *
+ * This requires configuration storage enabled, see above.
+ * default = false
+ */
+\$cfg['QueryHistoryDB'] = true;
+
+/**
+ * When using DB-based query history, how many entries should be kept?
+ * default = 25
+ */
+\$cfg['QueryHistoryMax'] = 100;
+
+/**
+ * Whether or not to query the user before sending the error report to
+ * the phpMyAdmin team when a JavaScript error occurs
+ *
+ * Available options
+ * ('ask' | 'always' | 'never')
+ * default = 'ask'
+ */
+\$cfg['SendErrorReports'] = 'never';
 ?>
 EOL
 
-      # Set proper ownership and permissions
-      chown apache:apache /etc/phpMyAdmin/config.inc.php
-      chmod 640 /etc/phpMyAdmin/config.inc.php
+  # Set proper permissions for config file
+  chown apache:apache /srv/web/phpmyadmin/config.inc.php
+  chmod 640 /srv/web/phpmyadmin/config.inc.php
 
-      # Set up SELinux context for phpMyAdmin if SELinux is enabled
-      if command -v sestatus &> /dev/null && sestatus | grep -q "enabled"; then
-          echo "Setting SELinux context for phpMyAdmin..."
-          semanage fcontext -a -t httpd_sys_content_t "/usr/share/phpMyAdmin(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
-          restorecon -Rv /usr/share/phpMyAdmin || echo "SELinux context restoration failed, continuing anyway..."
-          semanage fcontext -a -t httpd_sys_rw_content_t "/usr/share/phpMyAdmin/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
-          restorecon -Rv /usr/share/phpMyAdmin/tmp || echo "SELinux context restoration failed, continuing anyway..."
-      fi
+  # Create tmp directory
+  mkdir -p /srv/web/phpmyadmin/tmp
+  chown apache:apache /srv/web/phpmyadmin/tmp
+  chmod 750 /srv/web/phpmyadmin/tmp
 
-      # Create a non-root admin user for database management
-      echo "Creating a non-root admin user for database management..."
-      ADMIN_USER="dbadmin"
-      ADMIN_PASS=$(openssl rand -base64 12)
-
-      # Create the admin user with all privileges except grant
-      mysql -u root -prootpassword -e "
-      CREATE USER IF NOT EXISTS '$ADMIN_USER'@'localhost' IDENTIFIED BY '$ADMIN_PASS';
-      GRANT ALL PRIVILEGES ON *.* TO '$ADMIN_USER'@'localhost' WITH GRANT OPTION;
-      FLUSH PRIVILEGES;
-      " || {
-          echo -e "${RED}Failed to create admin user.${NC}"
-      }
-
-      echo -e "${GREEN}Created database admin user: $ADMIN_USER with password: $ADMIN_PASS${NC}"
-      echo -e "${GREEN}IMPORTANT: Save these credentials securely!${NC}"
-      echo -e "Username: $ADMIN_USER"
-      echo -e "Password: $ADMIN_PASS"
-      echo -e "${YELLOW}NOTE: Root login to phpMyAdmin has been disabled for security. Use the admin user above.${NC}"
-
-      # Link to main page
-      echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1><p>Access phpMyAdmin at <a href='https://phpmyadmin.$DOMAIN_NAME'>https://phpmyadmin.$DOMAIN_NAME</a></p></body></html>" > /srv/web/root/index.php
-
-      echo "phpMyAdmin configuration complete."
-  else
-      echo "WARNING: phpMyAdmin directory not found. Skipping phpMyAdmin configuration."
-      # Create a basic index.php file
-      mkdir -p /srv/web/root
-      echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1><p>phpMyAdmin installation failed.</p></body></html>" > /srv/web/root/index.php
+  # Set up SELinux context if SELinux is enabled
+  if command -v sestatus &> /dev/null && sestatus | grep -q "enabled"; then
+      echo "Setting SELinux context for phpMyAdmin..."
+      semanage fcontext -a -t httpd_sys_content_t "/srv/web/phpmyadmin(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
+      restorecon -Rv /srv/web/phpmyadmin || echo "SELinux context restoration failed, continuing anyway..."
+      semanage fcontext -a -t httpd_sys_rw_content_t "/srv/web/phpmyadmin/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
+      restorecon -Rv /srv/web/phpmyadmin/tmp || echo "SELinux context restoration failed, continuing anyway..."
   fi
+
+  # Create a non-root admin user for database management
+  echo "Creating a non-root admin user for database management..."
+  ADMIN_USER="dbadmin"
+  ADMIN_PASS=$(openssl rand -base64 12)
+
+  # Create the admin user with all privileges except grant
+  mysql -u root -prootpassword -e "
+  CREATE USER IF NOT EXISTS '$ADMIN_USER'@'localhost' IDENTIFIED BY '$ADMIN_PASS';
+  GRANT ALL PRIVILEGES ON *.* TO '$ADMIN_USER'@'localhost' WITH GRANT OPTION;
+  FLUSH PRIVILEGES;
+  " || {
+      echo -e "${RED}Failed to create admin user.${NC}"
+  }
+
+  echo -e "${GREEN}Created database admin user: $ADMIN_USER with password: $ADMIN_PASS${NC}"
+  echo -e "${GREEN}IMPORTANT: Save these credentials securely!${NC}"
+  echo -e "Username: $ADMIN_USER"
+  echo -e "Password: $ADMIN_PASS"
+  echo -e "${YELLOW}NOTE: Root login to phpMyAdmin has been disabled for security. Use the admin user above.${NC}"
+
+  # Link to main page
+  echo "<html><body><h1>Web Server Setup Complete for $DOMAIN_NAME</h1><p>Access phpMyAdmin at <a href='https://phpmyadmin.$DOMAIN_NAME'>https://phpmyadmin.$DOMAIN_NAME</a></p></body></html>" > /srv/web/root/index.php
 
   # Restart Apache
   systemctl restart httpd
