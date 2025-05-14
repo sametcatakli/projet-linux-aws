@@ -553,6 +553,7 @@ EOL
 \$cfg['Servers'][\$i]['auth_type'] = 'cookie';
 /* Server parameters */
 \$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][$i]['socket'] = '/var/lib/mysql/mysql.sock';
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
 \$cfg['Servers'][\$i]['AllowRoot'] = false; /* Disable root access */
