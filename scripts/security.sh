@@ -12,6 +12,7 @@ security_menu() {
     echo "| 2. Anti-Malware (ClamAV & RKHunter)                                  |"
     echo "| 3. SELinux Management                                                |"
     echo "| 4. Secure Mount Options                                              |"
+    echo "| 5. Fix phpMyAdmin SELinux Issues                                     |" # Added phpMyAdmin option
     echo "|----------------------------------------------------------------------|"
     echo "| q. Back to Main Menu                                                 |"
     echo "|----------------------------------------------------------------------|"
@@ -22,10 +23,222 @@ security_menu() {
       2) anti_malware ;;
       3) selinux_management ;;
       4) secure_mount_options ;;
+      5) fix_phpmyadmin_selinux ;; # Added case for phpMyAdmin fix
       q|Q) clear && break ;;
       *) clear && echo "Invalid choice. Please enter a valid option." ;;
     esac
   done
+}
+
+# Function to fix phpMyAdmin SELinux issues
+fix_phpmyadmin_selinux() {
+  clear
+  echo -e "${BLUE}===================================================================${NC}"
+  echo -e "${BLUE}      FIXING PHPMYADMIN SOCKET CONNECTION WITH SELINUX ENABLED      ${NC}"
+  echo -e "${BLUE}===================================================================${NC}"
+
+  # Verify phpMyAdmin location
+  if [ ! -d "/srv/web/phpmyadmin" ]; then
+    echo -e "${RED}phpMyAdmin directory not found at /srv/web/phpmyadmin${NC}"
+    echo "Press any key to continue..."
+    read -n 1 -s
+    return 1
+  fi
+
+  # Verify MySQL socket exists
+  if [ ! -S "/var/lib/mysql/mysql.sock" ]; then
+    echo -e "${YELLOW}MySQL socket not found. Checking MySQL status...${NC}"
+
+    # Check if MariaDB is installed and running
+    if systemctl is-active --quiet mariadb; then
+      echo -e "${GREEN}MariaDB is running. Verifying socket location...${NC}"
+    else
+      echo -e "${YELLOW}MariaDB is not running. Starting MariaDB...${NC}"
+      systemctl start mariadb
+      sleep 2
+    fi
+
+    # Check again for socket
+    if [ ! -S "/var/lib/mysql/mysql.sock" ]; then
+      # Try to find socket location from MySQL
+      SOCKET_PATH=$(mysql -e "SHOW VARIABLES LIKE 'socket';" | grep socket | awk '{print $2}')
+
+      if [ -z "$SOCKET_PATH" ] || [ ! -S "$SOCKET_PATH" ]; then
+        echo -e "${RED}Failed to locate MySQL socket. Please ensure MySQL/MariaDB is properly configured.${NC}"
+        echo "Press any key to continue..."
+        read -n 1 -s
+        return 1
+      else
+        echo -e "${GREEN}Found MySQL socket at $SOCKET_PATH${NC}"
+      fi
+    else
+      SOCKET_PATH="/var/lib/mysql/mysql.sock"
+      echo -e "${GREEN}Found MySQL socket at $SOCKET_PATH${NC}"
+    fi
+  else
+    SOCKET_PATH="/var/lib/mysql/mysql.sock"
+    echo -e "${GREEN}Found MySQL socket at $SOCKET_PATH${NC}"
+  fi
+
+  echo -e "\n${BLUE}1. Updating phpMyAdmin configuration to use socket...${NC}"
+  # Check for phpMyAdmin config file
+  CONFIG_FILE="/srv/web/phpmyadmin/config.inc.php"
+  if [ -f "$CONFIG_FILE" ]; then
+    # Backup config file
+    cp "$CONFIG_FILE" "${CONFIG_FILE}.bak.$(date +%Y%m%d%H%M%S)"
+    echo -e "${GREEN}Created backup of config file${NC}"
+
+    # Update the configuration to use socket explicitly
+    if grep -q "\$cfg\['Servers'\]\[\$i\]\['socket'\]" "$CONFIG_FILE"; then
+      # Update existing socket configuration
+      sed -i "s|\(\$cfg\['Servers'\]\[\$i\]\['socket'\] = \).*|\1'$SOCKET_PATH';|" "$CONFIG_FILE"
+      echo -e "${GREEN}Updated existing socket configuration${NC}"
+    else
+      # Add socket configuration if it doesn't exist
+      sed -i "/\$cfg\['Servers'\]\[\$i\]\['host'\]/a \$cfg['Servers'][\$i]['socket'] = '$SOCKET_PATH';" "$CONFIG_FILE"
+      echo -e "${GREEN}Added socket configuration${NC}"
+    fi
+
+    # Make sure connect_type is set to socket if that parameter exists
+    if grep -q "\$cfg\['Servers'\]\[\$i\]\['connect_type'\]" "$CONFIG_FILE"; then
+      sed -i "s|\(\$cfg\['Servers'\]\[\$i\]\['connect_type'\] = \).*|\1'socket';|" "$CONFIG_FILE"
+      echo -e "${GREEN}Set connect_type to socket${NC}"
+    fi
+
+    # Set proper ownership
+    chown apache:apache "$CONFIG_FILE"
+    chmod 640 "$CONFIG_FILE"
+  else
+    echo -e "${RED}phpMyAdmin config file not found at $CONFIG_FILE${NC}"
+    echo "Press any key to continue..."
+    read -n 1 -s
+    return 1
+  fi
+
+  echo -e "\n${BLUE}2. Setting SELinux booleans...${NC}"
+  # Set SELinux booleans
+  setsebool -P httpd_can_network_connect_db 1
+  setsebool -P httpd_can_network_connect 1
+  setsebool -P httpd_can_connect_mysql 1
+  echo -e "${GREEN}Set SELinux booleans${NC}"
+
+  echo -e "\n${BLUE}3. Setting SELinux context for socket and phpMyAdmin directory...${NC}"
+  # Set SELinux context for socket
+  chcon -t mysqld_var_run_t "$SOCKET_PATH"
+  restorecon -v "$SOCKET_PATH"
+
+  # Set proper context for phpMyAdmin directory
+  chcon -R -t httpd_sys_content_t /srv/web/phpmyadmin
+  restorecon -Rv /srv/web/phpmyadmin
+
+  # Ensure tmp directory has proper permissions
+  if [ -d "/srv/web/phpmyadmin/tmp" ]; then
+    chcon -R -t httpd_sys_rw_content_t /srv/web/phpmyadmin/tmp
+    chmod 750 /srv/web/phpmyadmin/tmp
+    chown apache:apache /srv/web/phpmyadmin/tmp
+    echo -e "${GREEN}Set permissions for tmp directory${NC}"
+  fi
+  echo -e "${GREEN}Set SELinux contexts${NC}"
+
+  echo -e "\n${BLUE}4. Creating custom SELinux policy...${NC}"
+  # Create custom SELinux policy
+  cat > /tmp/phpmyadmin_socket.te <<EOF
+module phpmyadmin_socket 1.0;
+
+require {
+    type httpd_t;
+    type mysqld_t;
+    type mysqld_var_run_t;
+    type httpd_sys_content_t;
+    type httpd_sys_rw_content_t;
+    class sock_file { read write getattr };
+    class unix_stream_socket connectto;
+    class dir { search read write add_name remove_name };
+    class file { read write getattr open create unlink };
+}
+
+#============= httpd_t ==============
+# Allow Apache to use the MySQL socket
+allow httpd_t mysqld_var_run_t:sock_file { read write getattr };
+allow httpd_t mysqld_t:unix_stream_socket connectto;
+
+# Allow Apache to write to its content directories
+allow httpd_t httpd_sys_rw_content_t:dir { search read write add_name remove_name };
+allow httpd_t httpd_sys_rw_content_t:file { read write getattr open create unlink };
+EOF
+
+  # Compile and load the policy
+  cd /tmp
+  if checkmodule -M -m -o phpmyadmin_socket.mod phpmyadmin_socket.te && \
+     semodule_package -o phpmyadmin_socket.pp -m phpmyadmin_socket.mod && \
+     semodule -i phpmyadmin_socket.pp; then
+    echo -e "${GREEN}Successfully created and installed custom SELinux policy${NC}"
+  else
+    echo -e "${RED}Failed to create and install custom SELinux policy${NC}"
+  fi
+
+  echo -e "\n${BLUE}5. Creating more permissive policy if needed...${NC}"
+  # Create a more permissive policy specifically for phpMyAdmin
+  cat > /tmp/phpmyadmin_permissive.te <<EOF
+module phpmyadmin_permissive 1.0;
+
+require {
+    type httpd_t;
+    type mysqld_db_t;
+    type mysqld_etc_t;
+    type mysqld_log_t;
+    type mysqld_var_run_t;
+    type tmp_t;
+    class sock_file write;
+    class unix_stream_socket connectto;
+    class dir { read search open getattr };
+    class file { read open getattr };
+}
+
+#============= httpd_t ==============
+# Very permissive rules for MySQL access
+allow httpd_t mysqld_db_t:dir { read search open getattr };
+allow httpd_t mysqld_db_t:file { read open getattr };
+allow httpd_t mysqld_etc_t:dir { read search open getattr };
+allow httpd_t mysqld_etc_t:file { read open getattr };
+allow httpd_t mysqld_log_t:dir { read search open getattr };
+allow httpd_t mysqld_var_run_t:dir { read search open getattr };
+allow httpd_t tmp_t:dir { write add_name remove_name };
+EOF
+
+  # Compile and load this more permissive policy
+  cd /tmp
+  if checkmodule -M -m -o phpmyadmin_permissive.mod phpmyadmin_permissive.te && \
+     semodule_package -o phpmyadmin_permissive.pp -m phpmyadmin_permissive.mod && \
+     semodule -i phpmyadmin_permissive.pp; then
+    echo -e "${GREEN}Successfully created and installed supplementary SELinux policy${NC}"
+  else
+    echo -e "${RED}Failed to create and install supplementary SELinux policy${NC}"
+  fi
+
+  echo -e "\n${BLUE}6. Restarting services...${NC}"
+  # Restart services
+  systemctl restart httpd
+  systemctl restart mariadb
+  echo -e "${GREEN}Restarted services${NC}"
+
+  # Check if SELinux is in enforcing mode
+  if [ "$(getenforce)" == "Enforcing" ]; then
+    echo -e "\n${YELLOW}NOTE: SELinux is currently in Enforcing mode.${NC}"
+    echo -e "${YELLOW}If phpMyAdmin still doesn't work, you can temporarily set SELinux to Permissive mode:${NC}"
+    echo -e "${YELLOW}   sudo setenforce 0${NC}"
+    echo -e "${YELLOW}After testing, you can set it back to Enforcing mode:${NC}"
+    echo -e "${YELLOW}   sudo setenforce 1${NC}"
+  fi
+
+  echo -e "\n${BLUE}===================================================================${NC}"
+  echo -e "${GREEN}Socket configuration and SELinux policy have been applied.${NC}"
+  echo -e "${GREEN}Try accessing phpMyAdmin now using your configured domain.${NC}"
+  echo -e "${BLUE}===================================================================${NC}"
+
+  echo "Press any key to continue..."
+  read -n 1 -s
+  return 0
 }
 
 # Function to manage firewall
@@ -191,7 +404,7 @@ selinux_management() {
     echo "13. Allow Netdata Monitoring"
     echo "14. Create Custom SELinux Rule"
     echo "15. Restore Default SELinux Context to File/Directory"
-    echo "16. Fix phpMyAdmin MySQL Socket Connection Issues" # New option
+    echo "16. Fix phpMyAdmin MySQL Socket Connection Issues"
     echo "q. Return to Security Menu"
     echo "=========================================================="
     read -p "Enter your choice: " choice
@@ -488,73 +701,8 @@ EOF
         fi
         ;;
       16) # Fix phpMyAdmin MySQL Socket Connection
-        echo "Configuring SELinux to allow phpMyAdmin to connect to MySQL socket..."
-
-        # Allow httpd to connect to databases
-        setsebool -P httpd_can_network_connect_db 1
-
-        # Allow httpd to connect to network
-        setsebool -P httpd_can_network_connect 1
-
-        # Set proper context for MySQL socket
-        if [ -S "/var/lib/mysql/mysql.sock" ]; then
-          echo "Setting context for MySQL socket..."
-          semanage fcontext -a -t mysqld_var_run_t "/var/lib/mysql/mysql.sock"
-          restorecon -v /var/lib/mysql/mysql.sock
-        else
-          echo -e "${YELLOW}Warning: MySQL socket not found at /var/lib/mysql/mysql.sock${NC}"
-          echo "MySQL may not be running. Start MySQL and try again."
-        fi
-
-        # Create a custom policy for httpd to access mysqld socket
-        echo "Creating custom policy to allow httpd to access mysqld socket..."
-
-        cat > /tmp/httpd_mysqld.te <<EOF
-module httpd_mysqld 1.0;
-
-require {
-    type httpd_t;
-    type mysqld_var_run_t;
-    class sock_file write;
-    class unix_stream_socket connectto;
-    type mysqld_t;
-}
-
-#============= httpd_t ==============
-allow httpd_t mysqld_var_run_t:sock_file write;
-allow httpd_t mysqld_t:unix_stream_socket connectto;
-EOF
-
-        # Compile and load the policy
-        cd /tmp
-        if command -v checkmodule &>/dev/null && command -v semodule_package &>/dev/null; then
-          checkmodule -M -m -o httpd_mysqld.mod httpd_mysqld.te && \
-          semodule_package -o httpd_mysqld.pp -m httpd_mysqld.mod && \
-          semodule -i httpd_mysqld.pp && \
-          echo -e "${GREEN}Custom SELinux policy for phpMyAdmin to MySQL socket created and installed.${NC}" || \
-          echo -e "${RED}Failed to create and install custom SELinux policy.${NC}"
-        else
-          echo -e "${RED}SELinux policy tools not found. Installing...${NC}"
-          dnf install -y checkpolicy setools-console
-          checkmodule -M -m -o httpd_mysqld.mod httpd_mysqld.te && \
-          semodule_package -o httpd_mysqld.pp -m httpd_mysqld.mod && \
-          semodule -i httpd_mysqld.pp && \
-          echo -e "${GREEN}Custom SELinux policy for phpMyAdmin to MySQL socket created and installed.${NC}" || \
-          echo -e "${RED}Failed to create and install custom SELinux policy.${NC}"
-        fi
-
-        # Clean up
-        rm -f /tmp/httpd_mysqld.te /tmp/httpd_mysqld.mod /tmp/httpd_mysqld.pp
-
-        # Restart services
-        echo "Restarting Apache and MySQL services..."
-        systemctl restart httpd
-        systemctl restart mariadb
-
-        echo -e "${GREEN}SELinux configured to allow phpMyAdmin to connect to MySQL socket.${NC}"
-        echo "You should now be able to login to phpMyAdmin without disabling SELinux."
+        fix_phpmyadmin_selinux
         ;;
-
       q|Q) # Quit
         # Ensure SSH access is still allowed before exiting
         setsebool -P ssh_sysadm_login 1
