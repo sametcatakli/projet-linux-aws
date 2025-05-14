@@ -168,7 +168,7 @@ EOF
       echo "Press any key to continue..."
       read -n 1 -s
       return 1
-    }
+    fi
 
     # Run mysql_secure_installation non-interactively
     echo "Securing MariaDB installation..."
@@ -210,29 +210,9 @@ create_limited_database() {
   }
 
   # Set up user with password and grant privileges
-  mysql -u root -prootpassword -e "CREATE USER IF NOT EXISTS '$USERNAME'@'localhost' IDENTIFIED BY '$PASSWORD';" || {
-    echo -e "${RED}Failed to create database user for $USERNAME.${NC}"
-    return 1
-  }
-
-  # Grant privileges on the user's database
-  mysql -u root -prootpassword -e "GRANT ALL PRIVILEGES ON ${USERNAME}_db.* TO '$USERNAME'@'localhost';" || {
+  mysql -u root -prootpassword -e "GRANT ALL PRIVILEGES ON ${USERNAME}_db.* TO '$USERNAME'@'localhost' IDENTIFIED BY '$PASSWORD';" || {
     echo -e "${RED}Failed to grant privileges for $USERNAME.${NC}"
     return 1
-  }
-
-  # Grant minimal privileges required for phpMyAdmin access
-  mysql -u root -prootpassword -e "GRANT SELECT ON mysql.db TO '$USERNAME'@'localhost';" || {
-    echo -e "${YELLOW}Warning: Could not grant phpMyAdmin access privileges for $USERNAME.${NC}"
-  }
-
-  mysql -u root -prootpassword -e "GRANT SELECT ON mysql.user TO '$USERNAME'@'localhost';" || {
-    echo -e "${YELLOW}Warning: Could not grant phpMyAdmin access privileges for $USERNAME.${NC}"
-  }
-
-  # For phpMyAdmin storage features if configured
-  mysql -u root -prootpassword -e "GRANT SELECT, INSERT, UPDATE, DELETE ON phpmyadmin.* TO '$USERNAME'@'localhost';" || {
-    echo -e "${YELLOW}Warning: Could not grant phpMyAdmin storage privileges for $USERNAME. This is normal if the phpmyadmin database doesn't exist.${NC}"
   }
 
   # Create a trigger to limit database size
@@ -284,7 +264,6 @@ create_limited_database() {
   }
 
   echo -e "${GREEN}Database ${USERNAME}_db created with size limit of $DB_SIZE_MB MB.${NC}"
-  echo -e "${GREEN}Database user '$USERNAME' created with phpMyAdmin access.${NC}"
   return 0
 }
 
@@ -449,7 +428,7 @@ basic_db() {
       echo "Press any key to continue..."
       read -n 1 -s key
       return 1
-  }
+  fi
 
   # Copy files instead of moving them (to avoid cross-device issues)
   echo "Copying phpMyAdmin files to web directory..."
@@ -481,7 +460,7 @@ basic_db() {
           # Increment the serial number in the SOA record
           serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
           new_serial=$((serial + 1))
-          sed -i "s/$serial ; Serial/$new_serial ; Serial/" "/var/named/forward.$DOMAIN_NAME"
+          sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
           # Reload named service
           systemctl reload named
           echo "DNS entry for phpmyadmin.$DOMAIN_NAME added successfully."
@@ -545,14 +524,10 @@ EOL
   # Configure phpMyAdmin security settings
   echo "Configuring phpMyAdmin security settings..."
 
-  # Get MySQL socket path
-  MYSQL_SOCKET=$(mysql -e "SHOW VARIABLES LIKE '%socket%';" | grep socket | awk '{print $2}')
-  echo "MySQL socket is at: $MYSQL_SOCKET"
-
   # Generate blowfish secret
   BLOWFISH_SECRET=$(openssl rand -hex 16)
 
-  # Create config.inc.php file with the correct socket path and temp directory
+  # Create config.inc.php file
   cat > "$PHPMYADMIN_DIR/config.inc.php" <<EOL
 <?php
 /**
@@ -581,12 +556,6 @@ EOL
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
 \$cfg['Servers'][\$i]['AllowRoot'] = false; /* Disable root access */
-\$cfg['Servers'][\$i]['socket'] = '$MYSQL_SOCKET'; /* Explicit socket path */
-
-/**
- * Directory for temporary files
- */
-\$cfg['TempDir'] = '$PHPMYADMIN_DIR/tmp';
 
 /**
  * phpMyAdmin configuration storage settings.
@@ -714,7 +683,7 @@ EOL
   chown apache:apache "$PHPMYADMIN_DIR/config.inc.php"
   chmod 640 "$PHPMYADMIN_DIR/config.inc.php"
 
-  # Create tmp directory with proper permissions
+  # Create tmp directory
   mkdir -p "$PHPMYADMIN_DIR/tmp"
   chown apache:apache "$PHPMYADMIN_DIR/tmp"
   chmod 750 "$PHPMYADMIN_DIR/tmp"
@@ -724,14 +693,8 @@ EOL
       echo "Setting SELinux context for phpMyAdmin..."
       semanage fcontext -a -t httpd_sys_content_t "$PHPMYADMIN_DIR(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
       restorecon -Rv "$PHPMYADMIN_DIR" || echo "SELinux context restoration failed, continuing anyway..."
-
-      # Configure specific SELinux context for the tmp directory
       semanage fcontext -a -t httpd_sys_rw_content_t "$PHPMYADMIN_DIR/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
       restorecon -Rv "$PHPMYADMIN_DIR/tmp" || echo "SELinux context restoration failed, continuing anyway..."
-
-      # Enable database connections for httpd
-      setsebool -P httpd_can_network_connect_db 1 || echo "SELinux boolean setting failed, continuing anyway..."
-      setsebool -P httpd_can_network_connect 1 || echo "SELinux boolean setting failed, continuing anyway..."
   fi
 
   # Create a non-root admin user for database management
