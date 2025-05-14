@@ -359,6 +359,7 @@ firewall_management() {
 }
 
 # Function to manage SELinux
+# Function to manage SELinux
 selinux_management() {
   # Check if SELinux is available
   if ! command -v getenforce &>/dev/null; then
@@ -395,16 +396,17 @@ selinux_management() {
     echo "4. Show Current SELinux Status"
     echo "5. Allow Web Server (HTTP/HTTPS)"
     echo "6. Allow Database Server (MySQL/MariaDB)"
-    echo "7. Allow FTP Server"
-    echo "8. Allow Samba Server"
-    echo "9. Allow NFS Server"
-    echo "10. Allow DNS Server"
-    echo "11. Allow Mail Server"
-    echo "12. Allow SSH Server"
-    echo "13. Allow Netdata Monitoring"
-    echo "14. Create Custom SELinux Rule"
-    echo "15. Restore Default SELinux Context to File/Directory"
-    echo "16. Fix phpMyAdmin MySQL Socket Connection Issues"
+    echo "7. PHP-FPM Connection Policy"                             # New option added here
+    echo "8. Allow FTP Server"
+    echo "9. Allow Samba Server"
+    echo "10. Allow NFS Server"
+    echo "11. Allow DNS Server"
+    echo "12. Allow Mail Server"
+    echo "13. Allow SSH Server"
+    echo "14. Allow Netdata Monitoring"
+    echo "15. Create Custom SELinux Rule"
+    echo "16. Restore Default SELinux Context to File/Directory"
+    echo "17. Fix phpMyAdmin MySQL Socket Connection Issues"
     echo "q. Return to Security Menu"
     echo "=========================================================="
     read -p "Enter your choice: " choice
@@ -484,7 +486,51 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for Database Server.${NC}"
         ;;
-      7) # Allow FTP Server
+      7) # PHP-FPM Connection Policy - New option
+        echo "Configuring SELinux policy for PHP-FPM to MySQL socket connection..."
+
+        # Create policy file for the specific denial
+        cat > /tmp/php_mysql_fix.te <<EOF
+module php_mysql_fix 1.0;
+
+require {
+    type httpd_t;
+    type unconfined_service_t;
+    type mysqld_t;
+    type mysqld_var_run_t;
+    class unix_stream_socket connectto;
+    class sock_file write;
+}
+
+#============= httpd_t ==============
+# Allow httpd (including php-fpm) to connect to MySQL socket with unconfined context
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;
+allow httpd_t mysqld_t:unix_stream_socket connectto;
+allow httpd_t mysqld_var_run_t:sock_file write;
+EOF
+
+        # Compile and install the policy
+        cd /tmp
+        if checkmodule -M -m -o php_mysql_fix.mod php_mysql_fix.te && \
+           semodule_package -o php_mysql_fix.pp -m php_mysql_fix.mod && \
+           semodule -i php_mysql_fix.pp; then
+          echo -e "${GREEN}Successfully created and installed SELinux policy for PHP-FPM to MySQL socket${NC}"
+        else
+          echo -e "${RED}Failed to create and install SELinux policy${NC}"
+        fi
+
+        # Restart services
+        echo "Restarting services..."
+        systemctl restart httpd
+        if systemctl is-active --quiet php-fpm; then
+          systemctl restart php-fpm
+        fi
+        systemctl restart mariadb
+
+        echo -e "${GREEN}PHP-FPM connection policy has been applied.${NC}"
+        echo -e "${GREEN}This should allow PHP-FPM processes to connect to the MySQL socket.${NC}"
+        ;;
+      8) # Allow FTP Server
         echo "Configuring SELinux for FTP Server..."
         # Allow FTP to read/write home directories
         setsebool -P ftp_home_dir 1
@@ -507,7 +553,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for FTP Server.${NC}"
         ;;
-      8) # Allow Samba Server
+      9) # Allow Samba Server
         echo "Configuring SELinux for Samba Server..."
         # Allow samba to share users home directories
         setsebool -P samba_enable_home_dirs 1
@@ -526,7 +572,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for Samba Server.${NC}"
         ;;
-      9) # Allow NFS Server
+      10) # Allow NFS Server
         echo "Configuring SELinux for NFS Server..."
         # Allow NFS to export all read/write
         setsebool -P nfs_export_all_rw 1
@@ -541,7 +587,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for NFS Server.${NC}"
         ;;
-      10) # Allow DNS Server
+      11) # Allow DNS Server
         echo "Configuring SELinux for DNS Server..."
         # Allow named to write to caching directory
         setsebool -P named_write_master_zones 1
@@ -558,7 +604,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for DNS Server.${NC}"
         ;;
-      11) # Allow Mail Server
+      12) # Allow Mail Server
         echo "Configuring SELinux for Mail Server..."
         # Allow postfix to read user mail
         setsebool -P postfix_local_read_mail 1
@@ -567,7 +613,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for Mail Server.${NC}"
         ;;
-      12) # Allow SSH Server
+      13) # Allow SSH Server
         echo "Configuring SELinux for SSH Server..."
         # Allow SSH to read and write to all files
         setsebool -P ssh_sysadm_login 1
@@ -578,7 +624,7 @@ selinux_management() {
 
         echo -e "${GREEN}SELinux configured for SSH Server.${NC}"
         ;;
-      13) # Allow Netdata Monitoring
+      14) # Allow Netdata Monitoring
         echo "Configuring SELinux for Netdata Monitoring..."
         # Create a custom policy for netdata if not already done
         if ! semodule -l | grep -q "netdata"; then
@@ -641,7 +687,7 @@ EOF
 
         echo -e "${GREEN}SELinux configured for Netdata Monitoring.${NC}"
         ;;
-      14) # Create Custom SELinux Rule
+      15) # Create Custom SELinux Rule
         echo "Creating a custom SELinux rule..."
         read -p "Enter the source context (e.g., httpd_t): " source_context
         read -p "Enter the target context (e.g., user_home_t): " target_context
@@ -687,7 +733,7 @@ EOF
           echo -e "${RED}Error: All fields are required.${NC}"
         fi
         ;;
-      15) # Restore SELinux Context
+      16) # Restore SELinux Context
         echo "Restoring SELinux context to a file or directory..."
         read -p "Enter the path to restore context: " context_path
 
@@ -700,7 +746,7 @@ EOF
           echo -e "${RED}Error: Path does not exist.${NC}"
         fi
         ;;
-      16) # Fix phpMyAdmin MySQL Socket Connection
+      17) # Fix phpMyAdmin MySQL Socket Connection
         fix_phpmyadmin_selinux
         ;;
       q|Q) # Quit
