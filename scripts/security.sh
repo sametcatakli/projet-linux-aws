@@ -1,0 +1,688 @@
+#!/bin/bash
+
+# Security menu
+security_menu() {
+  while true; do
+    clear
+    echo ""
+    echo "|----------------------------------------------------------------------|"
+    echo -e "|                     ${BLUE}Security Menu ${NC}                                  |"
+    echo "|----------------------------------------------------------------------|"
+    echo "| 1. Firewall Management                                               |"
+    echo "| 2. Anti-Malware (ClamAV & RKHunter)                                  |"
+    echo "| 3. SELinux Management                                                |"
+    echo "|----------------------------------------------------------------------|"
+    echo "| q. Back to Main Menu                                                 |"
+    echo "|----------------------------------------------------------------------|"
+    echo ""
+    read -p "Enter your choice: " security_choice
+    case $security_choice in
+      1) firewall_management ;;
+      2) anti_malware ;;
+      3) selinux_management ;;
+      q|Q) clear && break ;;
+      *) clear && echo "Invalid choice. Please enter a valid option." ;;
+    esac
+  done
+}
+
+# Function to manage firewall
+firewall_management() {
+  local choice
+
+  # Check if firewalld is installed first
+  if ! rpm -q firewalld &>/dev/null; then
+    echo -e "${YELLOW}Firewalld is not installed. Installing...${NC}"
+    dnf install -y firewalld || {
+      echo -e "${RED}Failed to install firewalld. Firewall management won't be available.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s
+      return 1
+    }
+    echo -e "${GREEN}Firewalld installed successfully.${NC}"
+  fi
+
+  # Ensure firewalld is running
+  if ! systemctl is-active --quiet firewalld; then
+    echo -e "${YELLOW}Firewalld is not running. Starting...${NC}"
+    systemctl enable firewalld
+    systemctl start firewalld
+    if ! systemctl is-active --quiet firewalld; then
+      echo -e "${RED}Failed to start firewalld. Firewall management won't be available.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s
+      return 1
+    fi
+    echo -e "${GREEN}Firewalld started successfully.${NC}"
+  fi
+
+  # Configure firewall to allow external connections for common services
+  configure_firewall_defaults() {
+    echo -e "${YELLOW}Configuring firewall defaults to allow external connections...${NC}"
+
+    # Set default zone to public
+    firewall-cmd --set-default-zone=public
+
+    # Add services to public zone
+    firewall-cmd --permanent --zone=public --add-service=ssh
+    firewall-cmd --permanent --zone=public --add-service=http
+    firewall-cmd --permanent --zone=public --add-service=https
+    firewall-cmd --permanent --zone=public --add-service=dns
+    firewall-cmd --permanent --zone=public --add-service=ftp
+
+    # Allow passive FTP port range
+    firewall-cmd --permanent --zone=public --add-port=30000-31000/tcp
+
+    # Apply changes
+    firewall-cmd --reload
+
+    echo -e "${GREEN}Firewall configured with permissive defaults.${NC}"
+  }
+
+  while true; do
+    clear
+    echo "=========================================================="
+    echo -e "${BLUE}              FIREWALL MANAGEMENT MENU             ${NC}"
+    echo "=========================================================="
+    echo "1. Open DNS Port (53)"
+    echo "2. Open HTTP Port (80)"
+    echo "3. Open HTTPS Port (443)"
+    echo "4. Open SSH Port (22)"
+    echo "5. Open MariaDB/MySQL Port (3306)"
+    echo "6. Open Samba Ports (137-139, 445)"
+    echo "7. Open NFS Ports (111, 2049, 4045)"
+    echo "8. Open FTP Ports (20, 21)"
+    echo "9. Open Cockpit Port (9090)"
+    echo "10. Show Current Firewall Status"
+    echo "11. Allow a Custom Port"
+    echo "12. Block All Ports (except opened ones)"
+    echo "13. Reset Firewall to Default"
+    echo "14. Enable Firewall"
+    echo "15. Disable Firewall"
+    echo "16. Netdata"
+    echo "17. Configure Permissive Defaults (Allow External Access)"
+    echo "q. Return to Previous Menu"
+    echo "=========================================================="
+    read -p "Enter your choice: " choice
+
+    case $choice in
+      1) # DNS
+        firewall-cmd --permanent --add-service=dns
+        echo -e "${GREEN}DNS port opened.${NC}"
+        ;;
+      2) # HTTP
+        firewall-cmd --permanent --add-service=http
+        echo -e "${GREEN}HTTP port opened.${NC}"
+        ;;
+      3) # HTTPS
+        firewall-cmd --permanent --add-service=https
+        echo -e "${GREEN}HTTPS port opened.${NC}"
+        ;;
+      4) # SSH
+        firewall-cmd --permanent --add-service=ssh
+        echo -e "${GREEN}SSH port opened.${NC}"
+        ;;
+      5) # MariaDB
+        firewall-cmd --permanent --add-service=mysql
+        echo -e "${GREEN}MariaDB/MySQL port opened.${NC}"
+        ;;
+      6) # Samba
+        firewall-cmd --permanent --add-service=samba
+        echo -e "${GREEN}Samba ports opened.${NC}"
+        ;;
+      7) # NFS
+        firewall-cmd --permanent --add-service=nfs
+        firewall-cmd --permanent --add-service=rpc-bind
+        firewall-cmd --permanent --add-service=mountd
+        echo -e "${GREEN}NFS ports opened.${NC}"
+        ;;
+      8) # FTP
+        firewall-cmd --permanent --add-service=ftp
+        firewall-cmd --permanent --add-port=30000-31000/tcp
+        echo -e "${GREEN}FTP ports opened (including passive range).${NC}"
+        ;;
+      9) # Cockpit
+        firewall-cmd --permanent --add-service=cockpit
+        echo -e "${GREEN}Cockpit port opened.${NC}"
+        ;;
+      10) # Status
+        echo "Current Firewall Status:"
+        echo "------------------------"
+        firewall-cmd --list-all
+        echo "------------------------"
+        ;;
+      11) # Custom port
+        read -p "Enter port number to open: " port
+        read -p "Enter protocol (tcp/udp): " protocol
+        if [[ "$port" =~ ^[0-9]+$ ]] && [[ "$protocol" =~ ^(tcp|udp)$ ]]; then
+          firewall-cmd --permanent --add-port=${port}/${protocol}
+          echo -e "${GREEN}Port ${port}/${protocol} opened.${NC}"
+        else
+          echo -e "${RED}Invalid input. Please enter a valid port number and protocol.${NC}"
+        fi
+        ;;
+      12) # Block all except opened
+        # Set default zone to drop
+        firewall-cmd --set-default-zone=drop
+        # But make sure established connections work
+        firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+        echo -e "${GREEN}Firewall set to block all traffic except for opened ports.${NC}"
+        ;;
+      13) # Reset
+        firewall-cmd --permanent --set-default-zone=public
+        firewall-cmd --permanent --zone=public --remove-port=1-65535/tcp
+        firewall-cmd --permanent --zone=public --remove-port=1-65535/udp
+        echo -e "${GREEN}Firewall reset to default configuration.${NC}"
+        ;;
+      14) # Enable
+        systemctl enable --now firewalld
+        echo -e "${GREEN}Firewall enabled and started.${NC}"
+        ;;
+      15) # Disable
+        systemctl disable --now firewalld
+        echo -e "${YELLOW}Firewall disabled and stopped.${NC}"
+        ;;
+      16) # Netdata
+        firewall-cmd --permanent --add-port=19999/tcp
+        echo -e "${YELLOW}Netdata port authorized.${NC}"
+        ;;
+      17) # Configure permissive defaults
+        configure_firewall_defaults
+        ;;
+      q|Q) # Quit
+        # Apply all changes
+        firewall-cmd --reload
+        echo -e "${GREEN}Firewall changes applied.${NC}"
+        break
+        ;;
+      *)
+        echo -e "${RED}Invalid choice. Please try again.${NC}"
+        ;;
+    esac
+
+    echo "Press any key to continue..."
+    read -n 1 -s
+  done
+}
+
+# Function to manage SELinux
+selinux_management() {
+  # Check if SELinux is available
+  if ! command -v getenforce &>/dev/null; then
+    echo -e "${YELLOW}SELinux tools not installed. Installing...${NC}"
+    dnf install -y selinux-policy selinux-policy-targeted policycoreutils policycoreutils-python-utils || {
+      echo -e "${RED}Failed to install SELinux tools. SELinux management won't be available.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s
+      return 1
+    }
+    echo -e "${GREEN}SELinux tools installed successfully.${NC}"
+  fi
+
+  while true; do
+    clear
+    # Get current SELinux status
+    local current_mode=$(getenforce)
+
+    echo "=========================================================="
+    echo -e "${BLUE}              SELinux MANAGEMENT MENU             ${NC}"
+    echo "=========================================================="
+    echo -e "Current SELinux Mode: ${YELLOW}$current_mode${NC}"
+    echo "=========================================================="
+    echo "1. Set SELinux to Enforcing Mode (Full Protection)"
+    echo "2. Set SELinux to Permissive Mode (Log Only)"
+    echo "3. Set SELinux to Disabled (Not Recommended)"
+    echo "4. Show Current SELinux Status"
+    echo "5. Allow Web Server (HTTP/HTTPS)"
+    echo "6. Allow Database Server (MySQL/MariaDB)"
+    echo "7. Allow FTP Server"
+    echo "8. Allow Samba Server"
+    echo "9. Allow NFS Server"
+    echo "10. Allow DNS Server"
+    echo "11. Allow Mail Server"
+    echo "12. Allow SSH Server"
+    echo "13. Allow Netdata Monitoring"
+    echo "14. Create Custom SELinux Rule"
+    echo "15. Restore Default SELinux Context to File/Directory"
+    echo "q. Return to Security Menu"
+    echo "=========================================================="
+    read -p "Enter your choice: " choice
+
+    case $choice in
+      1) # Set Enforcing
+        echo "Setting SELinux to Enforcing mode..."
+        setenforce 1
+        sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
+        echo -e "${GREEN}SELinux set to Enforcing mode.${NC}"
+        echo "This change will be permanent after reboot."
+        ;;
+      2) # Set Permissive
+        echo "Setting SELinux to Permissive mode..."
+        setenforce 0
+        sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
+        echo -e "${GREEN}SELinux set to Permissive mode.${NC}"
+        echo "This change will be permanent after reboot."
+        ;;
+      3) # Set Disabled
+        echo "Setting SELinux to Disabled mode..."
+        sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+        echo -e "${YELLOW}SELinux will be disabled after reboot.${NC}"
+        echo -e "${RED}Warning: Disabling SELinux reduces system security.${NC}"
+        ;;
+      4) # Show Status
+        echo "SELinux Status:"
+        echo "----------------"
+        sestatus
+        echo "----------------"
+        echo "Booleans related to server services:"
+        echo "----------------"
+        getsebool -a | grep -E 'http|ftp|samba|mysql|nfs|named|ssh|mail'
+        ;;
+      5) # Allow Web Server
+        echo "Configuring SELinux for Web Server (HTTP/HTTPS)..."
+        # Allow httpd network connections
+        setsebool -P httpd_can_network_connect 1
+        # Allow httpd to connect to databases
+        setsebool -P httpd_can_network_connect_db 1
+        # Allow httpd to serve content from home directories
+        setsebool -P httpd_enable_homedirs 1
+        # Allow httpd to read user content
+        setsebool -P httpd_read_user_content 1
+        # Allow httpd to use mod_auth_pam
+        setsebool -P httpd_mod_auth_pam 1
+        # Allow httpd scripts and modules to connect to the network
+        setsebool -P httpd_can_network_connect 1
+
+        echo "Checking for custom web directories and setting context..."
+        if [ -d "/srv/web" ]; then
+          echo "Setting SELinux context for /srv/web..."
+          semanage fcontext -a -t httpd_sys_content_t "/srv/web(/.*)?"
+          restorecon -Rv /srv/web
+        fi
+
+        echo -e "${GREEN}SELinux configured for Web Server.${NC}"
+        ;;
+      6) # Allow Database Server
+        echo "Configuring SELinux for Database Server (MySQL/MariaDB)..."
+        # Allow mysqld to connect to network
+        setsebool -P mysqld_connect_any 1
+        # Allow mysqld to access all directories
+        setsebool -P mysqld_disable_trans 1
+
+        if [ -d "/srv/database" ]; then
+          echo "Setting SELinux context for /srv/database..."
+          semanage fcontext -a -t mysqld_db_t "/srv/database(/.*)?"
+          restorecon -Rv /srv/database
+        fi
+
+        echo -e "${GREEN}SELinux configured for Database Server.${NC}"
+        ;;
+      7) # Allow FTP Server
+        echo "Configuring SELinux for FTP Server..."
+        # Allow FTP to read/write home directories
+        setsebool -P ftp_home_dir 1
+        # Allow FTP full access
+        setsebool -P ftpd_full_access 1
+        # Allow FTP to use CIFS
+        setsebool -P ftpd_use_cifs 1
+        # Allow FTP to use NFS
+        setsebool -P ftpd_use_nfs 1
+        # Allow FTP to connect to all unreserved ports
+        setsebool -P ftpd_connect_all_unreserved 1
+
+        if [ -d "/srv/share/ftp" ]; then
+          echo "Setting SELinux context for /srv/share/ftp..."
+          semanage fcontext -a -t public_content_t "/srv/share/ftp(/.*)?"
+          # Allow FTP uploads
+          semanage fcontext -a -t public_content_rw_t "/srv/share/ftp/upload(/.*)?"
+          restorecon -Rv /srv/share/ftp
+        fi
+
+        echo -e "${GREEN}SELinux configured for FTP Server.${NC}"
+        ;;
+      8) # Allow Samba Server
+        echo "Configuring SELinux for Samba Server..."
+        # Allow samba to share users home directories
+        setsebool -P samba_enable_home_dirs 1
+        # Allow samba to export any directory/file read/write
+        setsebool -P samba_export_all_rw 1
+        # Allow samba to share any file/directory read only
+        setsebool -P samba_export_all_ro 1
+        # Allow samba to create new files in the file context of samba share
+        setsebool -P samba_create_home_dirs 1
+
+        if [ -d "/srv/share" ]; then
+          echo "Setting SELinux context for /srv/share..."
+          semanage fcontext -a -t samba_share_t "/srv/share(/.*)?"
+          restorecon -Rv /srv/share
+        fi
+
+        echo -e "${GREEN}SELinux configured for Samba Server.${NC}"
+        ;;
+      9) # Allow NFS Server
+        echo "Configuring SELinux for NFS Server..."
+        # Allow NFS to export all read/write
+        setsebool -P nfs_export_all_rw 1
+        # Allow NFS to export all read only
+        setsebool -P nfs_export_all_ro 1
+
+        if [ -d "/srv/share" ]; then
+          echo "Setting SELinux context for /srv/share for NFS..."
+          semanage fcontext -a -t nfs_t "/srv/share(/.*)?"
+          restorecon -Rv /srv/share
+        fi
+
+        echo -e "${GREEN}SELinux configured for NFS Server.${NC}"
+        ;;
+      10) # Allow DNS Server
+        echo "Configuring SELinux for DNS Server..."
+        # Allow named to write to caching directory
+        setsebool -P named_write_master_zones 1
+
+        # Set proper context for named configuration and data
+        if [ -d "/var/named" ]; then
+          echo "Setting SELinux context for /var/named..."
+          restorecon -Rv /var/named
+        fi
+        if [ -f "/etc/named.conf" ]; then
+          echo "Setting SELinux context for /etc/named.conf..."
+          restorecon -v /etc/named.conf
+        fi
+
+        echo -e "${GREEN}SELinux configured for DNS Server.${NC}"
+        ;;
+      11) # Allow Mail Server
+        echo "Configuring SELinux for Mail Server..."
+        # Allow postfix to read user mail
+        setsebool -P postfix_local_read_mail 1
+        # Allow mail use spool
+        setsebool -P mail_read_content 1
+
+        echo -e "${GREEN}SELinux configured for Mail Server.${NC}"
+        ;;
+      12) # Allow SSH Server
+        echo "Configuring SELinux for SSH Server..."
+        # Allow SSH to read and write to all files
+        setsebool -P ssh_sysadm_login 1
+        # Allow sftp to access user home directories
+        setsebool -P sftpd_enable_homedirs 1
+        # Allow sftp full access
+        setsebool -P sftpd_full_access 1
+
+        echo -e "${GREEN}SELinux configured for SSH Server.${NC}"
+        ;;
+      13) # Allow Netdata Monitoring
+        echo "Configuring SELinux for Netdata Monitoring..."
+        # Create a custom policy for netdata if not already done
+        if ! semodule -l | grep -q "netdata"; then
+          echo "Creating custom SELinux policy for Netdata..."
+
+          # Create a temporary policy file
+          cat > /tmp/netdata.te <<EOF
+module netdata 1.0;
+
+require {
+    type unconfined_t;
+    type netdata_t;
+    type proc_t;
+    type sysfs_t;
+    type var_run_t;
+    type unreserved_port_t;
+    class file { getattr open read };
+    class dir { getattr read search };
+    class tcp_socket name_bind;
+}
+
+#============= netdata_t ==============
+allow netdata_t proc_t:file { getattr open read };
+allow netdata_t sysfs_t:dir { getattr read search };
+allow netdata_t sysfs_t:file { getattr open read };
+allow netdata_t unreserved_port_t:tcp_socket name_bind;
+allow netdata_t var_run_t:dir { getattr read search };
+EOF
+
+          # Compile and load the policy
+          cd /tmp
+          if command -v checkmodule &>/dev/null && command -v semodule_package &>/dev/null; then
+            checkmodule -M -m -o netdata.mod netdata.te && \
+            semodule_package -o netdata.pp -m netdata.mod && \
+            semodule -i netdata.pp && \
+            echo -e "${GREEN}Custom SELinux policy for Netdata created and installed.${NC}" || \
+            echo -e "${RED}Failed to create and install custom SELinux policy for Netdata.${NC}"
+          else
+            echo -e "${RED}SELinux policy tools not found. Installing...${NC}"
+            dnf install -y checkpolicy setools-console
+            checkmodule -M -m -o netdata.mod netdata.te && \
+            semodule_package -o netdata.pp -m netdata.mod && \
+            semodule -i netdata.pp && \
+            echo -e "${GREEN}Custom SELinux policy for Netdata created and installed.${NC}" || \
+            echo -e "${RED}Failed to create and install custom SELinux policy for Netdata.${NC}"
+          fi
+
+          # Clean up
+          rm -f /tmp/netdata.te /tmp/netdata.mod /tmp/netdata.pp
+        else
+          echo -e "${GREEN}SELinux policy for Netdata already exists.${NC}"
+        fi
+
+        # Allow netdata to bind to port 19999
+        if command -v semanage &>/dev/null; then
+          semanage port -a -t http_port_t -p tcp 19999 || \
+          semanage port -m -t http_port_t -p tcp 19999 || \
+          echo -e "${YELLOW}Failed to set SELinux port for Netdata, but continuing...${NC}"
+        fi
+
+        echo -e "${GREEN}SELinux configured for Netdata Monitoring.${NC}"
+        ;;
+      14) # Create Custom SELinux Rule
+        echo "Creating a custom SELinux rule..."
+        read -p "Enter the source context (e.g., httpd_t): " source_context
+        read -p "Enter the target context (e.g., user_home_t): " target_context
+        read -p "Enter the object class (e.g., file, dir): " object_class
+        read -p "Enter the permissions (e.g., read write): " permissions
+
+        if [ -n "$source_context" ] && [ -n "$target_context" ] && [ -n "$object_class" ] && [ -n "$permissions" ]; then
+          # Create a temporary policy file
+          cat > /tmp/custom.te <<EOF
+module custom 1.0;
+
+require {
+    type $source_context;
+    type $target_context;
+    class $object_class { $permissions };
+}
+
+#============= Custom Rule ==============
+allow $source_context $target_context:$object_class { $permissions };
+EOF
+
+          # Compile and load the policy
+          cd /tmp
+          if command -v checkmodule &>/dev/null && command -v semodule_package &>/dev/null; then
+            checkmodule -M -m -o custom.mod custom.te && \
+            semodule_package -o custom.pp -m custom.mod && \
+            semodule -i custom.pp && \
+            echo -e "${GREEN}Custom SELinux rule created and installed.${NC}" || \
+            echo -e "${RED}Failed to create and install custom SELinux rule.${NC}"
+          else
+            echo -e "${RED}SELinux policy tools not found. Installing...${NC}"
+            dnf install -y checkpolicy setools-console
+            checkmodule -M -m -o custom.mod custom.te && \
+            semodule_package -o custom.pp -m custom.mod && \
+            semodule -i custom.pp && \
+            echo -e "${GREEN}Custom SELinux rule created and installed.${NC}" || \
+            echo -e "${RED}Failed to create and install custom SELinux rule.${NC}"
+          fi
+
+          # Clean up
+          rm -f /tmp/custom.te /tmp/custom.mod /tmp/custom.pp
+        else
+          echo -e "${RED}Error: All fields are required.${NC}"
+        fi
+        ;;
+      15) # Restore SELinux Context
+        echo "Restoring SELinux context to a file or directory..."
+        read -p "Enter the path to restore context: " context_path
+
+        if [ -e "$context_path" ]; then
+          echo "Restoring SELinux context for $context_path..."
+          restorecon -Rv "$context_path" && \
+          echo -e "${GREEN}SELinux context restored for $context_path.${NC}" || \
+          echo -e "${RED}Failed to restore SELinux context for $context_path.${NC}"
+        else
+          echo -e "${RED}Error: Path does not exist.${NC}"
+        fi
+        ;;
+      q|Q) # Quit
+        break
+        ;;
+      *)
+        echo -e "${RED}Invalid choice. Please try again.${NC}"
+        ;;
+    esac
+
+    echo "Press any key to continue..."
+    read -n 1 -s
+  done
+}
+
+# Anti-malware function (main)
+anti_malware() {
+  clear
+  echo "Setting up Anti-Malware Protection (ClamAV and RKHunter)..."
+
+  # Run all security configurations
+  configure_clamav
+  configure_rkhunter
+  configure_fail2ban
+
+  echo "Anti-malware protection setup complete."
+  echo "Press any key to continue..."
+  read -n 1 -s key
+}
+
+# Configure ClamAV function
+configure_clamav() {
+  echo "Installing and configuring ClamAV..."
+
+  # Install ClamAV packages - removed non-existent packages
+  dnf install -y clamav clamav-update clamd
+
+  # Make sure freshclam configuration is correct
+  if grep -q "Example" /etc/freshclam.conf; then
+      sed -i 's/^Example/#Example/' /etc/freshclam.conf
+  fi
+
+  # Update virus database
+  echo "Updating ClamAV virus database..."
+  freshclam
+
+  # Configure clamd - paths may vary by distribution, check for correct location
+  if [ -f "/etc/clamd.d/scan.conf" ]; then
+      echo "Configuring clamd scan.conf..."
+      sed -i 's/^Example/#Example/' /etc/clamd.d/scan.conf
+      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.d/scan.conf
+      sed -i 's/^#LogFile /LogFile /' /etc/clamd.d/scan.conf
+      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.d/scan.conf
+  elif [ -f "/etc/clamd.conf" ]; then
+      echo "Configuring clamd.conf..."
+      sed -i 's/^Example/#Example/' /etc/clamd.conf
+      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.conf
+      sed -i 's/^#LogFile /LogFile /' /etc/clamd.conf
+      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.conf
+  fi
+
+  # Find the correct service name for clamd
+  if systemctl list-unit-files | grep -q "clamd@"; then
+      CLAMD_SERVICE="clamd@scan"
+  elif systemctl list-unit-files | grep -q "clamd.service"; then
+      CLAMD_SERVICE="clamd"
+  else
+      echo "Warning: Could not determine correct clamd service name. Manual configuration may be required."
+      CLAMD_SERVICE="clamd"
+  fi
+
+  # Enable and start services
+  systemctl enable clamav-freshclam.service
+  systemctl start clamav-freshclam.service
+
+  # Try to enable and start clamd if available
+  if [ -n "$CLAMD_SERVICE" ]; then
+      echo "Enabling and starting $CLAMD_SERVICE service..."
+      systemctl enable $CLAMD_SERVICE || echo "Warning: Failed to enable $CLAMD_SERVICE. ClamAV scanner may not be available."
+      systemctl start $CLAMD_SERVICE || echo "Warning: Failed to start $CLAMD_SERVICE. ClamAV scanner may not be available."
+  fi
+
+  # Set up daily scans
+  mkdir -p /etc/cron.daily
+  cat <<EOL > /etc/cron.daily/clamav-scan
+#!/bin/sh
+LOGFILE="/var/log/clamav/daily-scan.log"
+mkdir -p /var/log/clamav
+echo "ClamAV daily scan started at \$(date)" > \$LOGFILE
+clamscan -r --quiet --infected /srv /home /var/www /etc >> \$LOGFILE
+echo "ClamAV daily scan completed at \$(date)" >> \$LOGFILE
+EOL
+  chmod +x /etc/cron.daily/clamav-scan
+
+  echo "ClamAV has been configured successfully."
+}
+
+# Configure RKHunter function
+configure_rkhunter() {
+  echo "Installing and configuring RKHunter..."
+
+  # Install rkhunter
+  dnf install -y rkhunter
+
+  # Initial configuration and update
+  rkhunter --update
+  rkhunter --propupd
+
+  # Configure daily checks
+  cat <<EOL > /etc/cron.daily/rkhunter-check
+#!/bin/sh
+LOGFILE="/var/log/rkhunter/daily-scan.log"
+mkdir -p /var/log/rkhunter
+echo "RKHunter daily scan started at \$(date)" > \$LOGFILE
+rkhunter --check --skip-keypress --quiet >> \$LOGFILE
+echo "RKHunter daily scan completed at \$(date)" >> \$LOGFILE
+EOL
+  chmod +x /etc/cron.daily/rkhunter-check
+
+  echo "RKHunter has been configured successfully."
+}
+
+# Configure Fail2Ban function
+configure_fail2ban() {
+  echo "Installing and configuring Fail2Ban..."
+  # Install Fail2Ban
+  dnf install fail2ban -y
+
+  # Configure Fail2Ban for SSH
+  cat <<EOL > /etc/fail2ban/jail.d/sshd.local
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOL
+
+  # Configure Fail2Ban for Fedora Cockpit
+  cat <<EOL > /etc/fail2ban/jail.d/cockpit.local
+[cockpit]
+enabled = true
+port = http,https
+filter = cockpit
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOL
+
+  # Restart Fail2Ban service
+  systemctl enable --now fail2ban
+
+  echo "Fail2Ban configured for SSH and Fedora Cockpit."
+}
