@@ -481,7 +481,7 @@ basic_db() {
           # Increment the serial number in the SOA record
           serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
           new_serial=$((serial + 1))
-          sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME"
+          sed -i "s/$serial ; Serial/$new_serial ; Serial/" "/var/named/forward.$DOMAIN_NAME"
           # Reload named service
           systemctl reload named
           echo "DNS entry for phpmyadmin.$DOMAIN_NAME added successfully."
