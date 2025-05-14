@@ -289,7 +289,7 @@ basic_web_setup() {
 
   # Set up database frontend
   echo "Configuring database web interface..."
-  basic_db "$DOMAIN_NAME"
+  basic_db "$DOMAIN_NAME" "$IP_ADDRESS"
 
   echo "Web server setup complete."
   echo "Press any key to continue..."
@@ -365,6 +365,7 @@ EOL
 # Basic DB function
 basic_db() {
   DOMAIN_NAME=$1
+  IP_ADDRESS=$2
   echo "Setting up phpMyAdmin..."
 
   # Check if MariaDB is installed and running
@@ -381,11 +382,25 @@ basic_db() {
       firewall-cmd --reload || echo "Firewall reload failed, continuing anyway..."
   fi
 
+  # Ensure web directory exists
+  mkdir -p /srv/web
+
+  # First, clean up any existing phpmyadmin directory to prevent issues
+  PHPMYADMIN_DIR="/srv/web/phpmyadmin"
+
+  if [ -d "$PHPMYADMIN_DIR" ]; then
+      echo "Cleaning up existing phpMyAdmin directory..."
+      # Backup existing directory
+      BACKUP_DIR="/srv/web/phpmyadmin_backup_$(date +%Y%m%d%H%M%S)"
+      mv "$PHPMYADMIN_DIR" "$BACKUP_DIR"
+      echo "Backed up existing phpMyAdmin directory to $BACKUP_DIR"
+  fi
+
+  # Create a fresh directory
+  mkdir -p "$PHPMYADMIN_DIR"
+
   # Install phpMyAdmin manually from source
   echo "Installing phpMyAdmin from source..."
-
-  # Create directory for phpMyAdmin
-  mkdir -p /srv/web/phpmyadmin
 
   # Download latest phpMyAdmin
   echo "Downloading latest phpMyAdmin..."
@@ -406,7 +421,7 @@ basic_db() {
       return 1
   }
 
-  # Move to web directory
+  # Find extracted directory name
   PMA_DIR=$(find . -maxdepth 1 -type d -name "phpMyAdmin-*" -print | head -n 1)
   if [ -z "$PMA_DIR" ]; then
       echo -e "${RED}Failed to find phpMyAdmin directory after extraction.${NC}"
@@ -415,20 +430,23 @@ basic_db() {
       return 1
   fi
 
-  # Move to the proper location
-  mv $PMA_DIR /srv/web/phpmyadmin || {
-      echo -e "${RED}Failed to move phpMyAdmin to web directory.${NC}"
+  # Copy files instead of moving them (to avoid cross-device issues)
+  echo "Copying phpMyAdmin files to web directory..."
+  cp -r "$PMA_DIR"/* "$PHPMYADMIN_DIR"/ || {
+      echo -e "${RED}Failed to copy phpMyAdmin files to web directory.${NC}"
       echo "Press any key to continue..."
       read -n 1 -s key
       return 1
   }
 
-  # Remove the archive
-  rm -f phpMyAdmin-latest-all-languages.tar.gz
+  # Cleanup
+  echo "Cleaning up temporary files..."
+  rm -f /tmp/phpMyAdmin-latest-all-languages.tar.gz
+  rm -rf "$PMA_DIR"
 
   # Set proper ownership and permissions
-  chown -R apache:apache /srv/web/phpmyadmin
-  chmod -R 755 /srv/web/phpmyadmin
+  chown -R apache:apache "$PHPMYADMIN_DIR"
+  chmod -R 755 "$PHPMYADMIN_DIR"
 
   # Set up DNS entry for phpmyadmin subdomain
   echo "Adding DNS entry for phpmyadmin.$DOMAIN_NAME..."
@@ -506,14 +524,11 @@ EOL
   # Configure phpMyAdmin security settings
   echo "Configuring phpMyAdmin security settings..."
 
-  # Create configuration directory if it doesn't exist
-  mkdir -p /srv/web/phpmyadmin/config
-
   # Generate blowfish secret
   BLOWFISH_SECRET=$(openssl rand -hex 16)
 
   # Create config.inc.php file
-  cat > /srv/web/phpmyadmin/config.inc.php <<EOL
+  cat > "$PHPMYADMIN_DIR/config.inc.php" <<EOL
 <?php
 /**
  * phpMyAdmin configuration file
@@ -665,21 +680,21 @@ EOL
 EOL
 
   # Set proper permissions for config file
-  chown apache:apache /srv/web/phpmyadmin/config.inc.php
-  chmod 640 /srv/web/phpmyadmin/config.inc.php
+  chown apache:apache "$PHPMYADMIN_DIR/config.inc.php"
+  chmod 640 "$PHPMYADMIN_DIR/config.inc.php"
 
   # Create tmp directory
-  mkdir -p /srv/web/phpmyadmin/tmp
-  chown apache:apache /srv/web/phpmyadmin/tmp
-  chmod 750 /srv/web/phpmyadmin/tmp
+  mkdir -p "$PHPMYADMIN_DIR/tmp"
+  chown apache:apache "$PHPMYADMIN_DIR/tmp"
+  chmod 750 "$PHPMYADMIN_DIR/tmp"
 
   # Set up SELinux context if SELinux is enabled
   if command -v sestatus &> /dev/null && sestatus | grep -q "enabled"; then
       echo "Setting SELinux context for phpMyAdmin..."
-      semanage fcontext -a -t httpd_sys_content_t "/srv/web/phpmyadmin(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
-      restorecon -Rv /srv/web/phpmyadmin || echo "SELinux context restoration failed, continuing anyway..."
-      semanage fcontext -a -t httpd_sys_rw_content_t "/srv/web/phpmyadmin/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
-      restorecon -Rv /srv/web/phpmyadmin/tmp || echo "SELinux context restoration failed, continuing anyway..."
+      semanage fcontext -a -t httpd_sys_content_t "$PHPMYADMIN_DIR(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
+      restorecon -Rv "$PHPMYADMIN_DIR" || echo "SELinux context restoration failed, continuing anyway..."
+      semanage fcontext -a -t httpd_sys_rw_content_t "$PHPMYADMIN_DIR/tmp(/.*)?" || echo "SELinux context setting failed, continuing anyway..."
+      restorecon -Rv "$PHPMYADMIN_DIR/tmp" || echo "SELinux context restoration failed, continuing anyway..."
   fi
 
   # Create a non-root admin user for database management
