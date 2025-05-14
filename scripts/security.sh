@@ -29,9 +29,8 @@ security_menu() {
 }
 
 # Function to manage firewall
+# Function to manage firewall
 firewall_management() {
-  local choice
-
   # Check if firewalld is installed first
   if ! rpm -q firewalld &>/dev/null; then
     echo -e "${YELLOW}Firewalld is not installed. Installing...${NC}"
@@ -44,223 +43,103 @@ firewall_management() {
     echo -e "${GREEN}Firewalld installed successfully.${NC}"
   fi
 
-  # CRITICAL FIX: Always ensure SSH is allowed BEFORE starting firewalld
-  # This way even if firewalld is being enabled for the first time, SSH won't be blocked
-  echo "Ensuring SSH access remains available..."
-  firewall-cmd --permanent --add-service=ssh
-
-  # Ensure firewalld is running
-  if ! systemctl is-active --quiet firewalld; then
-    echo -e "${YELLOW}Firewalld is not running. Starting...${NC}"
-    systemctl enable firewalld
-
-    # Apply the SSH rule before starting firewalld to prevent lockout
-    echo "Applying SSH rule before starting firewall..."
-    firewall-cmd --permanent --add-service=ssh
-
-    systemctl start firewalld
-
-    if ! systemctl is-active --quiet firewalld; then
-      echo -e "${RED}Failed to start firewalld. Firewall management won't be available.${NC}"
-      echo "Press any key to continue..."
-      read -n 1 -s
-      return 1
-    fi
-    echo -e "${GREEN}Firewalld started successfully with SSH access preserved.${NC}"
-  fi
-
-  # CRITICAL FIX: Double-check SSH is allowed and apply changes
-  echo "Verifying SSH access is permitted in firewall..."
-  firewall-cmd --permanent --add-service=ssh
-  firewall-cmd --reload
-
-  # Configure firewall to allow external connections for common services
-  configure_firewall_defaults() {
-    echo -e "${YELLOW}Configuring firewall defaults to allow external connections...${NC}"
-
-    # Set default zone to public
-    firewall-cmd --set-default-zone=public
-
-    # CRITICAL: Make sure SSH comes first and is always included
-    firewall-cmd --permanent --zone=public --add-service=ssh
-
-    # Add other services to public zone
-    firewall-cmd --permanent --zone=public --add-service=http
-    firewall-cmd --permanent --zone=public --add-service=https
-    firewall-cmd --permanent --zone=public --add-service=dns
-    firewall-cmd --permanent --zone=public --add-service=ftp
-
-    # Allow passive FTP port range
-    firewall-cmd --permanent --zone=public --add-port=30000-31000/tcp
-
-    # Apply changes
-    firewall-cmd --reload
-
-    # Final verification that SSH is allowed
-    echo "Final verification of SSH access..."
-    if firewall-cmd --list-services | grep -q ssh; then
-      echo -e "${GREEN}SSH access confirmed in firewall.${NC}"
-    else
-      echo -e "${RED}ERROR: SSH service not found in firewall! Adding it now...${NC}"
-      firewall-cmd --permanent --add-service=ssh
-      firewall-cmd --reload
-    fi
-
-    echo -e "${GREEN}Firewall configured with permissive defaults.${NC}"
-  }
-
   while true; do
     clear
+    # Get current firewall status
+    if systemctl is-active --quiet firewalld; then
+      firewall_status="${GREEN}ENABLED${NC}"
+    else
+      firewall_status="${RED}DISABLED${NC}"
+    fi
+
     echo "=========================================================="
     echo -e "${BLUE}              FIREWALL MANAGEMENT MENU             ${NC}"
     echo "=========================================================="
-    echo "1. Open DNS Port (53)"
-    echo "2. Open HTTP Port (80)"
-    echo "3. Open HTTPS Port (443)"
-    echo "4. Open SSH Port (22)"
-    echo "5. Open MariaDB/MySQL Port (3306)"
-    echo "6. Open Samba Ports (137-139, 445)"
-    echo "7. Open NFS Ports (111, 2049, 4045)"
-    echo "8. Open FTP Ports (20, 21)"
-    echo "9. Open Cockpit Port (9090)"
-    echo "10. Show Current Firewall Status"
-    echo "11. Allow a Custom Port"
-    echo "12. Block All Ports (except opened ones)"
-    echo "13. Reset Firewall to Default"
-    echo "14. Enable Firewall"
-    echo "15. Disable Firewall"
-    echo "16. Netdata"
-    echo "17. Configure Permissive Defaults (Allow External Access)"
+    echo -e "Current Firewall Status: $firewall_status"
+    echo "=========================================================="
+    echo "1. Configure Firewall (Open All Service Ports)"
+    echo "2. Enable Firewall"
+    echo "3. Disable Firewall"
+    echo "4. Show Current Firewall Status"
     echo "q. Return to Previous Menu"
     echo "=========================================================="
     read -p "Enter your choice: " choice
 
     case $choice in
-      1) # DNS
-        firewall-cmd --permanent --add-service=dns
-        echo -e "${GREEN}DNS port opened.${NC}"
-        ;;
-      2) # HTTP
-        firewall-cmd --permanent --add-service=http
-        echo -e "${GREEN}HTTP port opened.${NC}"
-        ;;
-      3) # HTTPS
-        firewall-cmd --permanent --add-service=https
-        echo -e "${GREEN}HTTPS port opened.${NC}"
-        ;;
-      4) # SSH
-        firewall-cmd --permanent --add-service=ssh
-        echo -e "${GREEN}SSH port opened.${NC}"
-        ;;
-      5) # MariaDB
-        firewall-cmd --permanent --add-service=mysql
-        echo -e "${GREEN}MariaDB/MySQL port opened.${NC}"
-        ;;
-      6) # Samba
-        firewall-cmd --permanent --add-service=samba
-        echo -e "${GREEN}Samba ports opened.${NC}"
-        ;;
-      7) # NFS
-        firewall-cmd --permanent --add-service=nfs
-        firewall-cmd --permanent --add-service=rpc-bind
-        firewall-cmd --permanent --add-service=mountd
-        echo -e "${GREEN}NFS ports opened.${NC}"
-        ;;
-      8) # FTP
-        firewall-cmd --permanent --add-service=ftp
-        firewall-cmd --permanent --add-port=30000-31000/tcp
-        echo -e "${GREEN}FTP ports opened (including passive range).${NC}"
-        ;;
-      9) # Cockpit
-        firewall-cmd --permanent --add-service=cockpit
-        echo -e "${GREEN}Cockpit port opened.${NC}"
-        ;;
-      10) # Status
-        echo "Current Firewall Status:"
-        echo "------------------------"
-        firewall-cmd --list-all
-        echo "------------------------"
-        ;;
-      11) # Custom port
-        read -p "Enter port number to open: " port
-        read -p "Enter protocol (tcp/udp): " protocol
-        if [[ "$port" =~ ^[0-9]+$ ]] && [[ "$protocol" =~ ^(tcp|udp)$ ]]; then
-          firewall-cmd --permanent --add-port=${port}/${protocol}
-          echo -e "${GREEN}Port ${port}/${protocol} opened.${NC}"
-        else
-          echo -e "${RED}Invalid input. Please enter a valid port number and protocol.${NC}"
+      1) # Configure - open all common ports
+        echo "Configuring firewall with permissive defaults..."
+
+        # Make sure firewalld is running
+        if ! systemctl is-active --quiet firewalld; then
+          systemctl start firewalld
         fi
+
+        # Set default zone to public
+        firewall-cmd --set-default-zone=public
+
+        # Add all common services
+        firewall-cmd --permanent --zone=public --add-service=ssh
+        firewall-cmd --permanent --zone=public --add-service=http
+        firewall-cmd --permanent --zone=public --add-service=https
+        firewall-cmd --permanent --zone=public --add-service=dns
+        firewall-cmd --permanent --zone=public --add-service=ftp
+        firewall-cmd --permanent --zone=public --add-service=mysql
+        firewall-cmd --permanent --zone=public --add-service=samba
+        firewall-cmd --permanent --zone=public --add-service=nfs
+        firewall-cmd --permanent --zone=public --add-service=mountd
+        firewall-cmd --permanent --zone=public --add-service=rpc-bind
+        firewall-cmd --permanent --zone=public --add-service=cockpit
+
+        # Add Netdata port
+        firewall-cmd --permanent --zone=public --add-port=19999/tcp
+
+        # Add passive FTP port range
+        firewall-cmd --permanent --zone=public --add-port=30000-31000/tcp
+
+        # Apply changes
+        firewall-cmd --reload
+
+        echo -e "${GREEN}Firewall configured with all common service ports open.${NC}"
         ;;
-      12) # Block all except opened
-        # Make sure SSH is added first
+      2) # Enable
+        echo "Enabling firewall..."
+
+        # First make sure SSH is allowed to prevent lockout
         firewall-cmd --permanent --add-service=ssh
 
-        # Set default zone to drop
-        firewall-cmd --set-default-zone=drop
-
-        # But make sure established connections work
-        firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-        # Double-check SSH access
-        firewall-cmd --permanent --add-service=ssh
-
-        echo -e "${GREEN}Firewall set to block all traffic except for opened ports.${NC}"
-        echo -e "${GREEN}SSH access has been preserved.${NC}"
-        ;;
-      13) # Reset
-        # Make sure SSH is allowed before resetting
-        firewall-cmd --permanent --add-service=ssh
-
-        firewall-cmd --permanent --set-default-zone=public
-        firewall-cmd --permanent --zone=public --remove-port=1-65535/tcp
-        firewall-cmd --permanent --zone=public --remove-port=1-65535/udp
-
-        # Add SSH again after reset
-        firewall-cmd --permanent --add-service=ssh
-
-        echo -e "${GREEN}Firewall reset to default configuration with SSH access preserved.${NC}"
-        ;;
-      14) # Enable
-        # Make sure SSH is allowed before enabling
-        firewall-cmd --permanent --add-service=ssh
-
+        # Enable and start firewalld
         systemctl enable --now firewalld
 
-        # Verify SSH is still allowed after enabling
+        # Add SSH again and apply
         firewall-cmd --permanent --add-service=ssh
         firewall-cmd --reload
 
-        echo -e "${GREEN}Firewall enabled and started with SSH access preserved.${NC}"
+        echo -e "${GREEN}Firewall enabled and started.${NC}"
         ;;
-      15) # Disable
+      3) # Disable
+        echo "Disabling firewall..."
         systemctl disable --now firewalld
         echo -e "${YELLOW}Firewall disabled and stopped.${NC}"
         ;;
-      16) # Netdata
-        firewall-cmd --permanent --add-port=19999/tcp
-        echo -e "${YELLOW}Netdata port authorized.${NC}"
-        ;;
-      17) # Configure permissive defaults
-        configure_firewall_defaults
+      4) # Status
+        echo "Current Firewall Status:"
+        echo "------------------------"
+        if systemctl is-active --quiet firewalld; then
+          echo -e "Firewall is ${GREEN}ACTIVE${NC}"
+          echo -e "\nOpen ports and services:"
+          firewall-cmd --list-all
+        else
+          echo -e "Firewall is ${RED}INACTIVE${NC}"
+        fi
+        echo "------------------------"
         ;;
       q|Q) # Quit
-        # Apply all changes
-
-        # Make sure SSH is still allowed before final apply
-        firewall-cmd --permanent --add-service=ssh
-        firewall-cmd --reload
-
-        echo -e "${GREEN}Firewall changes applied with SSH access preserved.${NC}"
         break
         ;;
       *)
         echo -e "${RED}Invalid choice. Please try again.${NC}"
         ;;
     esac
-
-    # Always ensure SSH access after any action
-    firewall-cmd --permanent --add-service=ssh
-    firewall-cmd --reload
 
     echo "Press any key to continue..."
     read -n 1 -s
