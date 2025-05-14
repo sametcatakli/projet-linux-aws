@@ -127,6 +127,27 @@ EOL
       echo "Creating database for user $USERNAME with 100MB limit..."
       create_limited_database "$USERNAME" 100 "$PASSWORD"
       echo "Database ${USERNAME}_db created with 100MB limit."
+
+      # Create the phpMyAdmin user access separately for better control
+      echo "Setting up phpMyAdmin access for $USERNAME..."
+      mysql -u root -prootpassword -e "GRANT SELECT ON mysql.db TO '$USERNAME'@'localhost';" || {
+          echo -e "${YELLOW}Warning: Could not grant phpMyAdmin access privileges for $USERNAME.${NC}"
+      }
+
+      mysql -u root -prootpassword -e "GRANT SELECT ON mysql.user TO '$USERNAME'@'localhost';" || {
+          echo -e "${YELLOW}Warning: Could not grant phpMyAdmin access privileges for $USERNAME.${NC}"
+      }
+
+      # For phpMyAdmin storage features if configured
+      mysql -u root -prootpassword -e "GRANT SELECT, INSERT, UPDATE, DELETE ON phpmyadmin.* TO '$USERNAME'@'localhost';" || {
+          echo -e "${YELLOW}Warning: Could not grant phpMyAdmin storage privileges for $USERNAME. This is normal if the phpmyadmin database doesn't exist.${NC}"
+      }
+
+      mysql -u root -prootpassword -e "FLUSH PRIVILEGES;" || {
+          echo -e "${RED}Failed to flush privileges.${NC}"
+      }
+
+      echo -e "${GREEN}Database user '$USERNAME' configured with phpMyAdmin access.${NC}"
   fi
 
   # Create a simple index.php file in the user's directory
@@ -179,12 +200,33 @@ EOL
       restorecon -Rv /srv || echo "SELinux context restoration failed, continuing anyway..."
   fi
 
+  # Update DNS entry if available
+  if [ -f "/var/named/forward.$DOMAIN_NAME" ]; then
+      # Check if entry already exists
+      if ! grep -q "^$USERNAME" "/var/named/forward.$DOMAIN_NAME"; then
+          # Get the server IP address
+          SERVER_IP=$(grep "^@" "/var/named/forward.$DOMAIN_NAME" | awk '{print $NF}')
+          if [ -n "$SERVER_IP" ]; then
+              # Add the user subdomain to DNS
+              sed -i "/^ns /a $USERNAME      IN  A       $SERVER_IP" "/var/named/forward.$DOMAIN_NAME"
+              # Increment the serial number in the SOA record
+              serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
+              new_serial=$((serial + 1))
+              sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
+              # Reload named service
+              systemctl reload named
+              echo "DNS entry for $USERNAME.$DOMAIN_NAME added successfully."
+          fi
+      fi
+  fi
+
   # Restart Apache
   systemctl restart httpd || echo "Failed to restart httpd service"
 
-  echo "User $USERNAME has been created with web, FTP, and SMB access."
+  echo -e "${GREEN}User $USERNAME has been created with web, FTP, and SMB access.${NC}"
   if rpm -q MariaDB-server &>/dev/null && systemctl is-active --quiet mariadb; then
-      echo "Database ${USERNAME}_db has been created with a 100MB limit."
+      echo -e "${GREEN}Database ${USERNAME}_db has been created with a 100MB limit.${NC}"
+      echo -e "${GREEN}User can access phpMyAdmin at https://phpmyadmin.$DOMAIN_NAME with username '$USERNAME' and the same password.${NC}"
   fi
   echo "User has the following quotas:"
   echo "- Home directory: 50MB"
@@ -206,17 +248,49 @@ remove_user() {
   smbpasswd -x $USERNAME
   rm -rf /srv/web/$USERNAME
 
-  # Check if MariaDB is installed and running before dropping database
+  # Check if MariaDB is installed and running before dropping database and user
   if rpm -q MariaDB-server &>/dev/null && systemctl is-active --quiet mariadb; then
+      # Drop the user's database
       mysql -u root -prootpassword -e "DROP DATABASE IF EXISTS ${USERNAME}_db;"
+      # Drop the MariaDB user
+      mysql -u root -prootpassword -e "DROP USER IF EXISTS '$USERNAME'@'localhost';"
+      # Flush privileges to apply changes
+      mysql -u root -prootpassword -e "FLUSH PRIVILEGES;"
+      echo "Database and database user for $USERNAME removed."
   else
       echo "WARNING: MariaDB is not running. User database not removed."
   fi
 
+  # Remove Apache virtual host configuration
   rm -f /etc/httpd/conf.d/001-$USERNAME.conf
 
+  # Remove DNS entry if available
+  if [ -f "/var/named/forward.$DOMAIN_NAME" ]; then
+      # Check if entry exists
+      if grep -q "^$USERNAME" "/var/named/forward.$DOMAIN_NAME"; then
+          # Remove the user subdomain from DNS
+          sed -i "/^$USERNAME/d" "/var/named/forward.$DOMAIN_NAME"
+          # Increment the serial number in the SOA record
+          serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
+          new_serial=$((serial + 1))
+          sed -i "s/$serial ; Serial/$new_serial ; Serial/" "/var/named/forward.$DOMAIN_NAME"
+          # Reload named service
+          systemctl reload named
+          echo "DNS entry for $USERNAME removed successfully."
+      fi
+  fi
+
+  # Remove SMB share configuration
+  if [ -f "/etc/samba/smb.conf" ]; then
+      # Remove the user share section from smb.conf
+      sed -i "/\[$USERNAME\]/,/read only = no/d" /etc/samba/smb.conf
+      systemctl restart smb || echo "Failed to restart smb service"
+  fi
+
+  # Restart Apache
   systemctl restart httpd
-  echo "User $USERNAME and their data have been removed."
+
+  echo -e "${GREEN}User $USERNAME and their data have been completely removed.${NC}"
   echo "Press any key to continue..."
   read -n 1 -s key
 }
