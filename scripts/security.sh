@@ -26,6 +26,185 @@ security_menu() {
   done
 }
 
+# Function to manage firewall
+firewall_management() {
+  local choice
+
+  # Check if firewalld is installed first
+  if ! rpm -q firewalld &>/dev/null; then
+    echo -e "${YELLOW}Firewalld is not installed. Installing...${NC}"
+    dnf install -y firewalld || {
+      echo -e "${RED}Failed to install firewalld. Firewall management won't be available.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s
+      return 1
+    }
+    echo -e "${GREEN}Firewalld installed successfully.${NC}"
+  fi
+
+  # Ensure firewalld is running
+  if ! systemctl is-active --quiet firewalld; then
+    echo -e "${YELLOW}Firewalld is not running. Starting...${NC}"
+    systemctl enable firewalld
+    systemctl start firewalld
+    if ! systemctl is-active --quiet firewalld; then
+      echo -e "${RED}Failed to start firewalld. Firewall management won't be available.${NC}"
+      echo "Press any key to continue..."
+      read -n 1 -s
+      return 1
+    fi
+    echo -e "${GREEN}Firewalld started successfully.${NC}"
+  fi
+
+  # Configure firewall to allow external connections for common services
+  configure_firewall_defaults() {
+    echo -e "${YELLOW}Configuring firewall defaults to allow external connections...${NC}"
+
+    # Set default zone to public
+    firewall-cmd --set-default-zone=public
+
+    # Add services to public zone
+    firewall-cmd --permanent --zone=public --add-service=ssh
+    firewall-cmd --permanent --zone=public --add-service=http
+    firewall-cmd --permanent --zone=public --add-service=https
+    firewall-cmd --permanent --zone=public --add-service=dns
+    firewall-cmd --permanent --zone=public --add-service=ftp
+
+    # Allow passive FTP port range
+    firewall-cmd --permanent --zone=public --add-port=30000-31000/tcp
+
+    # Apply changes
+    firewall-cmd --reload
+
+    echo -e "${GREEN}Firewall configured with permissive defaults.${NC}"
+  }
+
+  while true; do
+    clear
+    echo "=========================================================="
+    echo -e "${BLUE}              FIREWALL MANAGEMENT MENU             ${NC}"
+    echo "=========================================================="
+    echo "1. Open DNS Port (53)"
+    echo "2. Open HTTP Port (80)"
+    echo "3. Open HTTPS Port (443)"
+    echo "4. Open SSH Port (22)"
+    echo "5. Open MariaDB/MySQL Port (3306)"
+    echo "6. Open Samba Ports (137-139, 445)"
+    echo "7. Open NFS Ports (111, 2049, 4045)"
+    echo "8. Open FTP Ports (20, 21)"
+    echo "9. Open Cockpit Port (9090)"
+    echo "10. Show Current Firewall Status"
+    echo "11. Allow a Custom Port"
+    echo "12. Block All Ports (except opened ones)"
+    echo "13. Reset Firewall to Default"
+    echo "14. Enable Firewall"
+    echo "15. Disable Firewall"
+    echo "16. Netdata"
+    echo "17. Configure Permissive Defaults (Allow External Access)"
+    echo "q. Return to Previous Menu"
+    echo "=========================================================="
+    read -p "Enter your choice: " choice
+
+    case $choice in
+      1) # DNS
+        firewall-cmd --permanent --add-service=dns
+        echo -e "${GREEN}DNS port opened.${NC}"
+        ;;
+      2) # HTTP
+        firewall-cmd --permanent --add-service=http
+        echo -e "${GREEN}HTTP port opened.${NC}"
+        ;;
+      3) # HTTPS
+        firewall-cmd --permanent --add-service=https
+        echo -e "${GREEN}HTTPS port opened.${NC}"
+        ;;
+      4) # SSH
+        firewall-cmd --permanent --add-service=ssh
+        echo -e "${GREEN}SSH port opened.${NC}"
+        ;;
+      5) # MariaDB
+        firewall-cmd --permanent --add-service=mysql
+        echo -e "${GREEN}MariaDB/MySQL port opened.${NC}"
+        ;;
+      6) # Samba
+        firewall-cmd --permanent --add-service=samba
+        echo -e "${GREEN}Samba ports opened.${NC}"
+        ;;
+      7) # NFS
+        firewall-cmd --permanent --add-service=nfs
+        firewall-cmd --permanent --add-service=rpc-bind
+        firewall-cmd --permanent --add-service=mountd
+        echo -e "${GREEN}NFS ports opened.${NC}"
+        ;;
+      8) # FTP
+        firewall-cmd --permanent --add-service=ftp
+        firewall-cmd --permanent --add-port=30000-31000/tcp
+        echo -e "${GREEN}FTP ports opened (including passive range).${NC}"
+        ;;
+      9) # Cockpit
+        firewall-cmd --permanent --add-service=cockpit
+        echo -e "${GREEN}Cockpit port opened.${NC}"
+        ;;
+      10) # Status
+        echo "Current Firewall Status:"
+        echo "------------------------"
+        firewall-cmd --list-all
+        echo "------------------------"
+        ;;
+      11) # Custom port
+        read -p "Enter port number to open: " port
+        read -p "Enter protocol (tcp/udp): " protocol
+        if [[ "$port" =~ ^[0-9]+$ ]] && [[ "$protocol" =~ ^(tcp|udp)$ ]]; then
+          firewall-cmd --permanent --add-port=${port}/${protocol}
+          echo -e "${GREEN}Port ${port}/${protocol} opened.${NC}"
+        else
+          echo -e "${RED}Invalid input. Please enter a valid port number and protocol.${NC}"
+        fi
+        ;;
+      12) # Block all except opened
+        # Set default zone to drop
+        firewall-cmd --set-default-zone=drop
+        # But make sure established connections work
+        firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+        echo -e "${GREEN}Firewall set to block all traffic except for opened ports.${NC}"
+        ;;
+      13) # Reset
+        firewall-cmd --permanent --set-default-zone=public
+        firewall-cmd --permanent --zone=public --remove-port=1-65535/tcp
+        firewall-cmd --permanent --zone=public --remove-port=1-65535/udp
+        echo -e "${GREEN}Firewall reset to default configuration.${NC}"
+        ;;
+      14) # Enable
+        systemctl enable --now firewalld
+        echo -e "${GREEN}Firewall enabled and started.${NC}"
+        ;;
+      15) # Disable
+        systemctl disable --now firewalld
+        echo -e "${YELLOW}Firewall disabled and stopped.${NC}"
+        ;;
+      16) # Netdata
+        firewall-cmd --permanent --add-port=19999/tcp
+        echo -e "${YELLOW}Netdata port authorized.${NC}"
+        ;;
+      17) # Configure permissive defaults
+        configure_firewall_defaults
+        ;;
+      q|Q) # Quit
+        # Apply all changes
+        firewall-cmd --reload
+        echo -e "${GREEN}Firewall changes applied.${NC}"
+        break
+        ;;
+      *)
+        echo -e "${RED}Invalid choice. Please try again.${NC}"
+        ;;
+    esac
+
+    echo "Press any key to continue..."
+    read -n 1 -s
+  done
+}
+
 # Function to manage SELinux
 selinux_management() {
   # Check if SELinux is available
@@ -367,5 +546,143 @@ EOF
   done
 }
 
-# Rest of the file remains the same as before
-# ...
+# Anti-malware function (main)
+anti_malware() {
+  clear
+  echo "Setting up Anti-Malware Protection (ClamAV and RKHunter)..."
+
+  # Run all security configurations
+  configure_clamav
+  configure_rkhunter
+  configure_fail2ban
+
+  echo "Anti-malware protection setup complete."
+  echo "Press any key to continue..."
+  read -n 1 -s key
+}
+
+# Configure ClamAV function
+configure_clamav() {
+  echo "Installing and configuring ClamAV..."
+
+  # Install ClamAV packages - removed non-existent packages
+  dnf install -y clamav clamav-update clamd
+
+  # Make sure freshclam configuration is correct
+  if grep -q "Example" /etc/freshclam.conf; then
+      sed -i 's/^Example/#Example/' /etc/freshclam.conf
+  fi
+
+  # Update virus database
+  echo "Updating ClamAV virus database..."
+  freshclam
+
+  # Configure clamd - paths may vary by distribution, check for correct location
+  if [ -f "/etc/clamd.d/scan.conf" ]; then
+      echo "Configuring clamd scan.conf..."
+      sed -i 's/^Example/#Example/' /etc/clamd.d/scan.conf
+      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.d/scan.conf
+      sed -i 's/^#LogFile /LogFile /' /etc/clamd.d/scan.conf
+      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.d/scan.conf
+  elif [ -f "/etc/clamd.conf" ]; then
+      echo "Configuring clamd.conf..."
+      sed -i 's/^Example/#Example/' /etc/clamd.conf
+      sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamd.conf
+      sed -i 's/^#LogFile /LogFile /' /etc/clamd.conf
+      sed -i 's/^#LogFileMaxSize /LogFileMaxSize /' /etc/clamd.conf
+  fi
+
+  # Find the correct service name for clamd
+  if systemctl list-unit-files | grep -q "clamd@"; then
+      CLAMD_SERVICE="clamd@scan"
+  elif systemctl list-unit-files | grep -q "clamd.service"; then
+      CLAMD_SERVICE="clamd"
+  else
+      echo "Warning: Could not determine correct clamd service name. Manual configuration may be required."
+      CLAMD_SERVICE="clamd"
+  fi
+
+  # Enable and start services
+  systemctl enable clamav-freshclam.service
+  systemctl start clamav-freshclam.service
+
+  # Try to enable and start clamd if available
+  if [ -n "$CLAMD_SERVICE" ]; then
+      echo "Enabling and starting $CLAMD_SERVICE service..."
+      systemctl enable $CLAMD_SERVICE || echo "Warning: Failed to enable $CLAMD_SERVICE. ClamAV scanner may not be available."
+      systemctl start $CLAMD_SERVICE || echo "Warning: Failed to start $CLAMD_SERVICE. ClamAV scanner may not be available."
+  fi
+
+  # Set up daily scans
+  mkdir -p /etc/cron.daily
+  cat <<EOL > /etc/cron.daily/clamav-scan
+#!/bin/sh
+LOGFILE="/var/log/clamav/daily-scan.log"
+mkdir -p /var/log/clamav
+echo "ClamAV daily scan started at \$(date)" > \$LOGFILE
+clamscan -r --quiet --infected /srv /home /var/www /etc >> \$LOGFILE
+echo "ClamAV daily scan completed at \$(date)" >> \$LOGFILE
+EOL
+  chmod +x /etc/cron.daily/clamav-scan
+
+  echo "ClamAV has been configured successfully."
+}
+
+# Configure RKHunter function
+configure_rkhunter() {
+  echo "Installing and configuring RKHunter..."
+
+  # Install rkhunter
+  dnf install -y rkhunter
+
+  # Initial configuration and update
+  rkhunter --update
+  rkhunter --propupd
+
+  # Configure daily checks
+  cat <<EOL > /etc/cron.daily/rkhunter-check
+#!/bin/sh
+LOGFILE="/var/log/rkhunter/daily-scan.log"
+mkdir -p /var/log/rkhunter
+echo "RKHunter daily scan started at \$(date)" > \$LOGFILE
+rkhunter --check --skip-keypress --quiet >> \$LOGFILE
+echo "RKHunter daily scan completed at \$(date)" >> \$LOGFILE
+EOL
+  chmod +x /etc/cron.daily/rkhunter-check
+
+  echo "RKHunter has been configured successfully."
+}
+
+# Configure Fail2Ban function
+configure_fail2ban() {
+  echo "Installing and configuring Fail2Ban..."
+  # Install Fail2Ban
+  dnf install fail2ban -y
+
+  # Configure Fail2Ban for SSH
+  cat <<EOL > /etc/fail2ban/jail.d/sshd.local
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOL
+
+  # Configure Fail2Ban for Fedora Cockpit
+  cat <<EOL > /etc/fail2ban/jail.d/cockpit.local
+[cockpit]
+enabled = true
+port = http,https
+filter = cockpit
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOL
+
+  # Restart Fail2Ban service
+  systemctl enable --now fail2ban
+
+  echo "Fail2Ban configured for SSH and Fedora Cockpit."
+}
