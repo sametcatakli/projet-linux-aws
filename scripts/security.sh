@@ -29,7 +29,6 @@ security_menu() {
 }
 
 # Function to manage firewall
-# Function to manage firewall
 firewall_management() {
   # Check if firewalld is installed first
   if ! rpm -q firewalld &>/dev/null; then
@@ -530,23 +529,53 @@ secure_mount_options() {
     echo "5. Add secure options to a custom mount point"
     echo "6. Restore fstab from backup"
     echo "7. View current fstab"
-    echo "8. Make /boot read-only (ro)"
+    echo "8. Make /boot/efi read-only (ro)"
+    echo "9. Clean up duplicate mount options"
     echo "q. Return to Security Menu"
     echo "=========================================================="
     read -p "Enter your choice: " choice
 
     case $choice in
       1) # Secure /tmp
-        secure_mount_point "/tmp" "noexec,nosuid,nodev"
+        # Check if /tmp is a separate mount point
+        if grep -q "[[:space:]]/tmp[[:space:]]" /etc/fstab; then
+          secure_mount_point "/tmp" "noexec,nosuid,nodev"
+        else
+          echo -e "${YELLOW}/tmp is not a separate mount point. Creating a tmpfs mount for /tmp...${NC}"
+          # Add a tmpfs mount for /tmp if it doesn't exist
+          echo "tmpfs /tmp tmpfs defaults,noexec,nosuid,nodev,size=2G 0 0" >> /etc/fstab
+          echo -e "${GREEN}Added secure tmpfs mount for /tmp.${NC}"
+        fi
         ;;
       2) # Secure /var/tmp
-        secure_mount_point "/var/tmp" "noexec,nosuid,nodev"
+        # Check if /var/tmp is a separate mount point
+        if grep -q "[[:space:]]/var/tmp[[:space:]]" /etc/fstab; then
+          secure_mount_point "/var/tmp" "noexec,nosuid,nodev"
+        else
+          echo -e "${YELLOW}/var/tmp is not a separate mount point. Creating a tmpfs mount for /var/tmp...${NC}"
+          # Add a tmpfs mount for /var/tmp if it doesn't exist
+          echo "tmpfs /var/tmp tmpfs defaults,noexec,nosuid,nodev,size=1G 0 0" >> /etc/fstab
+          echo -e "${GREEN}Added secure tmpfs mount for /var/tmp.${NC}"
+        fi
         ;;
       3) # Secure /home
-        secure_mount_point "/home" "nodev"
+        if grep -q "[[:space:]]/home[[:space:]]" /etc/fstab; then
+          secure_mount_point "/home" "nodev"
+        else
+          echo -e "${YELLOW}/home is not a separate mount point. Adding nodev to root partition...${NC}"
+          # If /home is not a separate partition, we can modify the root partition
+          secure_mount_point "/" "nodev"
+        fi
         ;;
       4) # Secure /srv
-        secure_mount_point "/srv" "nodev"
+        if grep -q "[[:space:]]/srv[[:space:]]" /etc/fstab; then
+          secure_mount_point "/srv" "nodev"
+        else
+          echo -e "${YELLOW}/srv is not a separate mount point.${NC}"
+          echo -e "${YELLOW}Adding nodev to /srv/share and /srv/web instead...${NC}"
+          secure_mount_point "/srv/share" "nodev"
+          secure_mount_point "/srv/web" "nodev"
+        fi
         ;;
       5) # Custom mount point
         read -p "Enter the mount point (e.g., /mnt/data): " custom_mountpoint
@@ -555,13 +584,15 @@ secure_mount_options() {
         echo "2. nosuid - Prevent suid/sgid bits from having an effect"
         echo "3. nodev - Prevent character or special devices"
         echo "4. All of the above"
-        read -p "Enter option (1-4): " sec_option
+        echo "5. ro - Read-only file system"
+        read -p "Enter option (1-5): " sec_option
 
         case $sec_option in
           1) secure_mount_point "$custom_mountpoint" "noexec" ;;
           2) secure_mount_point "$custom_mountpoint" "nosuid" ;;
           3) secure_mount_point "$custom_mountpoint" "nodev" ;;
           4) secure_mount_point "$custom_mountpoint" "noexec,nosuid,nodev" ;;
+          5) secure_mount_point "$custom_mountpoint" "ro" ;;
           *) echo -e "${RED}Invalid option selected.${NC}" ;;
         esac
         ;;
@@ -577,13 +608,23 @@ secure_mount_options() {
         echo "Press any key to continue..."
         read -n 1 -s
         ;;
-      8) # Make /boot read-only
-        echo "Adding 'ro' (read-only) option to /boot..."
-        secure_mount_point "/boot" "ro"
-        echo -e "${YELLOW}IMPORTANT: When updating the kernel or bootloader, you will need to temporarily remount /boot as read-write:${NC}"
-        echo "   sudo mount -o remount,rw /boot"
+      8) # Make /boot/efi read-only
+        echo "Adding 'ro' (read-only) option to /boot/efi..."
+        secure_mount_point "/boot/efi" "ro"
+        echo -e "${YELLOW}IMPORTANT: When updating the bootloader or EFI files, you will need to temporarily remount /boot/efi as read-write:${NC}"
+        echo "   sudo mount -o remount,rw /boot/efi"
         echo "   # perform updates"
-        echo "   sudo mount -o remount,ro /boot"
+        echo "   sudo mount -o remount,ro /boot/efi"
+        ;;
+      9) # Clean up duplicate mount options
+        echo "Cleaning up duplicate mount options in fstab..."
+        # Create a backup before cleaning
+        local backup_file="/etc/fstab.clean.$(date +%Y%m%d%H%M%S)"
+        cp /etc/fstab "$backup_file"
+        echo -e "${GREEN}Backup created: $backup_file${NC}"
+
+        # Process each mount point to clean up duplicate options
+        clean_duplicate_options
         ;;
       q|Q) # Quit
         break
@@ -646,7 +687,7 @@ secure_mount_point() {
   fi
 
   # Remove any duplicate options
-  new_options=$(echo "$new_options" | sed 's/,\+/,/g' | sed 's/^,//;s/,$//')
+  new_options=$(echo "$new_options" | tr ',' '\n' | sort | uniq | tr '\n' ',' | sed 's/,$//')
 
   # Create the new line
   local new_line="$device $mount_point $fs_type $new_options $dump_flag $fsck_order"
@@ -655,7 +696,7 @@ secure_mount_point() {
   sed -i "s|^.*[[:space:]]${mount_point}[[:space:]].*\$|$new_line|" /etc/fstab
 
   # Verify the change was made correctly
-  if grep -q "^$new_line$" /etc/fstab; then
+  if grep -q "$mount_point" /etc/fstab; then
     echo -e "${GREEN}Successfully added $secure_options to $mount_point.${NC}"
 
     # Remind user to remount or reboot
@@ -667,6 +708,39 @@ secure_mount_point() {
     cp "$backup_file" /etc/fstab
     echo -e "${GREEN}Restored from backup.${NC}"
   fi
+}
+
+# Function to clean up duplicate mount options
+clean_duplicate_options() {
+  # Process each non-comment line in fstab
+  while read -r line; do
+    # Skip empty lines and comments
+    if [[ -z "$line" || "$line" =~ ^# ]]; then
+      continue
+    fi
+
+    # Parse the line
+    local device=$(echo "$line" | awk '{print $1}')
+    local mount_point=$(echo "$line" | awk '{print $2}')
+    local fs_type=$(echo "$line" | awk '{print $3}')
+    local options=$(echo "$line" | awk '{print $4}')
+    local dump_flag=$(echo "$line" | awk '{print $5}')
+    local fsck_order=$(echo "$line" | awk '{print $6}')
+
+    # Clean up duplicate options
+    local clean_options=$(echo "$options" | tr ',' '\n' | sort | uniq | tr '\n' ',' | sed 's/,$//')
+
+    # Create new line with clean options
+    local new_line="$device $mount_point $fs_type $clean_options $dump_flag $fsck_order"
+
+    # Replace the old line with the new line
+    sed -i "s|^$device[[:space:]]$mount_point[[:space:]]$fs_type[[:space:]]$options[[:space:]]$dump_flag[[:space:]]$fsck_order\$|$new_line|" /etc/fstab
+
+    echo -e "${GREEN}Cleaned mount options for $mount_point.${NC}"
+
+  done < <(grep -v '^#' /etc/fstab | grep -v '^$')
+
+  echo -e "${GREEN}All duplicate mount options have been cleaned.${NC}"
 }
 
 # Helper function to restore fstab from backup
