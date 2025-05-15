@@ -162,7 +162,6 @@ raid() {
 }
 
 # Backup function
-backup(){
-
-
+backup() {
+    echo "no script"
 }
