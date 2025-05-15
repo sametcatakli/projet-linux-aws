@@ -110,8 +110,6 @@ EOL
   chown $USERNAME:$USERNAME "$DIR/ftp"
   chmod 755 "$DIR/ftp"
 
-  # Create a symbolic link to their web directory if needed
-  ln -sf "$DIR" "$DIR/ftp/web"
 
   # Add firewall rule for FTP if not already added
   firewall-cmd --permanent --add-service=ftp

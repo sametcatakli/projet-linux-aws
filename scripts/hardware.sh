@@ -9,7 +9,7 @@ hardware_menu() {
     echo -e "|                 ${BLUE}Hardware Management Menu ${NC}                           |"
     echo "|----------------------------------------------------------------------|"
     echo "| 1. RAID Configuration                                                |"
-    echo "| 2. Backup to External Drive                                          |"
+    echo "| 2. Backup to S3                                          |"
     echo "|----------------------------------------------------------------------|"
     echo "| q. Back to Main Menu                                                 |"
     echo "|----------------------------------------------------------------------|"
@@ -162,73 +162,7 @@ raid() {
 }
 
 # Backup function
-backup() {
-  clear
-  lsblk
+backup(){
 
-  read -p "Enter the disk name to use for backup (e.g., sdb): " BACKUP_DISK
-  echo "Selected disk for backup: $BACKUP_DISK"
 
-  if [ ! -b "/dev/$BACKUP_DISK" ]; then
-      echo "Error: Device /dev/$BACKUP_DISK not found!"
-      echo "Available disks:"
-      lsblk
-      echo "Press any key to return to main menu..."
-      read -n 1 -s key
-      return 1
-  fi
-
-  # Create a mount point for the backup disk
-  mkdir -p /mnt/backup
-
-  # Format the disk in ext4
-  echo "Formatting disk /dev/$BACKUP_DISK as ext4..."
-  mkfs.ext4 /dev/$BACKUP_DISK
-
-  # Mount the backup disk
-  echo "Mounting disk /dev/$BACKUP_DISK to /mnt/backup..."
-  mount /dev/$BACKUP_DISK /mnt/backup || {
-      echo "Error: Failed to mount /dev/$BACKUP_DISK"
-      echo "Press any key to return to main menu..."
-      read -n 1 -s key
-      return 1
-  }
-
-  # Create a backup log file
-  touch /mnt/backup/backup.log
-
-  # Append a timestamp to the log file
-  echo "$(date) - Backup started" >> /mnt/backup/backup.log
-
-  # Create a directory with the current date and time
-  TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-  mkdir -p /mnt/backup/$TIMESTAMP
-
-  # Use rsync to backup the /srv/share directory
-  rsync -avz /srv/share /mnt/backup/$TIMESTAMP/share
-
-  # Use rsync to backup each directory from /srv/web on /mnt/backup/$TIMESTAMP/web
-  rsync -avz /srv/web /mnt/backup/$TIMESTAMP/web
-
-  # Create a directory to store user databases
-  mkdir -p /mnt/backup/$TIMESTAMP/user_databases
-
-  # Check if MariaDB is installed and running before backing up databases
-  if rpm -q MariaDB-server &>/dev/null && systemctl is-active --quiet mariadb; then
-      # Backup each user's database
-      while IFS= read -r USERNAME; do
-          mysqldump -u root -prootpassword ${USERNAME}_db > /mnt/backup/$TIMESTAMP/user_databases/${USERNAME}_db.sql
-      done < <(pdbedit -L | cut -d: -f1)
-
-      # Append a timestamp to the log file
-      echo "$(date) - User databases backed up" >> /mnt/backup/backup.log
-  else
-      echo "WARNING: MariaDB is not running. Databases not backed up." >> /mnt/backup/backup.log
-      echo "WARNING: MariaDB is not running. Databases not backed up."
-  fi
-
-  echo "Backup complete. Your data has been backed up to /mnt/backup/$TIMESTAMP"
-
-  echo "Press any key to continue..."
-  read -n 1 -s key
 }

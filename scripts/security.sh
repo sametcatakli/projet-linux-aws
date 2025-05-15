@@ -1213,13 +1213,12 @@ EOL
   echo "RKHunter has been configured successfully."
 }
 
-# Configure Fail2Ban function
 configure_fail2ban() {
   echo "Installing and configuring Fail2Ban..."
-  # Install Fail2Ban
   dnf install fail2ban -y
 
-  # Configure Fail2Ban for SSH
+  mkdir -p /etc/fail2ban/jail.d
+
   cat <<EOL > /etc/fail2ban/jail.d/sshd.local
 [sshd]
 enabled = true
@@ -1230,7 +1229,6 @@ maxretry = 3
 bantime = 3600
 EOL
 
-  # Configure Fail2Ban for Fedora Cockpit
   cat <<EOL > /etc/fail2ban/jail.d/cockpit.local
 [cockpit]
 enabled = true
@@ -1241,8 +1239,37 @@ maxretry = 3
 bantime = 3600
 EOL
 
-  # Restart Fail2Ban service
+  cat <<EOL > /etc/fail2ban/jail.d/ftp.local
+[vsftpd]
+enabled = true
+port = ftp,ftp-data,ftps,ftps-data
+filter = vsftpd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOL
+
+  cat <<EOL > /etc/fail2ban/jail.d/samba.local
+[samba]
+enabled = true
+port = samba,samba-ds,samba-ds-port
+filter = samba
+logpath = /var/log/samba/log.smbd
+maxretry = 3
+bantime = 3600
+EOL
+
+  cat <<EOL > /etc/fail2ban/jail.d/apache.local
+[apache-auth]
+enabled = true
+port = http,https
+filter = apache-auth
+logpath = /var/log/httpd/*error_log
+maxretry = 3
+bantime = 3600
+EOL
+
   systemctl enable --now fail2ban
 
-  echo "Fail2Ban configured for SSH and Fedora Cockpit."
+  echo "Fail2Ban configured for SSH, Fedora Cockpit, FTP, Samba, and Apache."
 }

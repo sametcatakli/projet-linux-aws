@@ -8,16 +8,16 @@ web_services_menu() {
     echo "|----------------------------------------------------------------------|"
     echo -e "|                     ${BLUE}Web Services Menu ${NC}                               |"
     echo "|----------------------------------------------------------------------|"
-    echo "| 1. Basic Web Server Setup                                            |"
-    echo "| 2. Install MariaDB on RAID                                           |"
+    echo "| 1. Install MariaDB on RAID                                           |"
+    echo "| 2. Base Web Server Setup                                             |"
     echo "|----------------------------------------------------------------------|"
     echo "| q. Back to Main Menu                                                 |"
     echo "|----------------------------------------------------------------------|"
     echo ""
     read -p "Enter your choice: " web_choice
     case $web_choice in
-      1) basic_web_setup ;;
-      2) install_mariadb_on_raid ;;
+      1) install_mariadb_on_raid ;;
+      2) basic_web_setup ;;
       q|Q) clear && break ;;
       *) clear && echo "Invalid choice. Please enter a valid option." ;;
     esac
