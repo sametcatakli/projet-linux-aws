@@ -170,44 +170,40 @@ backup() {
     echo "|----------------------------------------------------------------------|"
     echo ""
 
-    # Détection du répertoire du script appelant
+    # 1) On calcule le dossier du script appelant
     local SCRIPT_DIR
     SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+    # 2) Définit où seront générés le script et son log
     local BACKUP_SH="$SCRIPT_DIR/backup.sh"
+    local LOG_FILE="$SCRIPT_DIR/backup.log"
 
-    # Définition des variables de sauvegarde
-    local BACKUP_USER="ec2-user"
-    local BACKUP_HOST="10.42.0.129"
-    local DIRS_TO_BACKUP=( "/var" "/home" "/srv" )
-    local BACKUP_DIR="~/saveConf"
-    local LOG_FILE="/var/log/backup.log"
-
-    # Génération du script backup.sh via here-doc
+    # 3) Génération de backup.sh
     cat > "$BACKUP_SH" << 'EOL'
 #!/bin/bash
 
-# --- Variables ---
+# — Variables de connexion et chemins
 BACKUP_USER="ec2-user"
 BACKUP_HOST="10.42.0.129"
 DIRS_TO_BACKUP=( "/var" "/home" "/srv" )
 BACKUP_DIR="~/saveConf"
-LOG_FILE="/var/log/backup.log"
+LOG_FILE="'"$LOG_FILE"'"
 
-# --- Prépa du log ---
+# — Préparation du fichier de log
 if [ ! -f "$LOG_FILE" ]; then
     touch "$LOG_FILE"
 fi
 chmod 666 "$LOG_FILE"
 
-# --- Boucle de sauvegarde ---
+# — Boucle de sauvegarde
 for DIR in "${DIRS_TO_BACKUP[@]}"; do
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de \$DIR → \$BACKUP_USER@\${BACKUP_HOST}:\${BACKUP_DIR}\$(dirname "\$DIR")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR → $BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")"
     rsync -avz --delete --exclude=lost+found \
         -e "ssh -i ~/.ssh/serveur2.pem" \
-        "\$DIR"/ "\$BACKUP_USER@\${BACKUP_HOST}:\${BACKUP_DIR}\$(dirname "\$DIR")/" \
-        >> "\$LOG_FILE" 2>&1
+        "$DIR"/ "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")/" \
+        >> "$LOG_FILE" 2>&1
 
-    if [ \$? -eq 0 ]; then
+    if [ $? -eq 0 ]; then
         echo "→ OK"
     else
         echo "→ ERREUR"
@@ -215,15 +211,14 @@ for DIR in "${DIRS_TO_BACKUP[@]}"; do
     echo ""
 done
 
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
-
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
 EOL
 
-    # Rendre backup.sh exécutable
+    # 4) On rend le script exécutable
     chmod +x "$BACKUP_SH"
-    echo "Script créé : $BACKUP_SH"
+    echo "Script créé et rendu exécutable : $BACKUP_SH"
 
-    # Installation de la tâche cron (02:00 chaque jour)
+    # 5) On installe la tâche cron à 02h00
     local CRON_JOB="0 2 * * * $BACKUP_SH >> $LOG_FILE 2>&1"
     if crontab -l 2>/dev/null | grep -Fqx "$CRON_JOB"; then
         echo "La tâche cron existe déjà, rien à faire."
