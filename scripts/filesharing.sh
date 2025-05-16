@@ -163,7 +163,7 @@ ftp_share() {
       setquota -u nobody 50000 55000 0 0 /srv/share || echo "Failed to set quota, continuing anyway..."
   fi
 
-  # Configure anonymous FTP - Removed tcp_wrappers option that was causing errors
+  # Configure anonymous FTP
   cat <<EOL > /etc/vsftpd/vsftpd.conf
 anonymous_enable=YES
 local_enable=YES
