@@ -170,45 +170,62 @@ backup() {
     echo "|----------------------------------------------------------------------|"
     echo ""
 
+    # Détection du répertoire du script appelant
+    local SCRIPT_DIR
+    SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+    local BACKUP_SH="$SCRIPT_DIR/backup.sh"
+
+    # Définition des variables de sauvegarde
     local BACKUP_USER="ec2-user"
     local BACKUP_HOST="10.42.0.129"
     local DIRS_TO_BACKUP=( "/var" "/home" "/srv" )
     local BACKUP_DIR="~/saveConf"
     local LOG_FILE="/var/log/backup.log"
-    local SCRIPT_PATH
-    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
-    # Création et permissions du fichier de log
-    if [ ! -f "$LOG_FILE" ]; then
-        touch "$LOG_FILE"
+    # Génération du script backup.sh via here-doc
+    cat > "$BACKUP_SH" << 'EOL'
+#!/bin/bash
+
+# --- Variables ---
+BACKUP_USER="ec2-user"
+BACKUP_HOST="10.42.0.129"
+DIRS_TO_BACKUP=( "/var" "/home" "/srv" )
+BACKUP_DIR="~/saveConf"
+LOG_FILE="/var/log/backup.log"
+
+# --- Prépa du log ---
+if [ ! -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE"
+fi
+chmod 666 "$LOG_FILE"
+
+# --- Boucle de sauvegarde ---
+for DIR in "${DIRS_TO_BACKUP[@]}"; do
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de \$DIR → \$BACKUP_USER@\${BACKUP_HOST}:\${BACKUP_DIR}\$(dirname "\$DIR")"
+    rsync -avz --delete --exclude=lost+found \
+        -e "ssh -i ~/.ssh/serveur2.pem" \
+        "\$DIR"/ "\$BACKUP_USER@\${BACKUP_HOST}:\${BACKUP_DIR}\$(dirname "\$DIR")/" \
+        >> "\$LOG_FILE" 2>&1
+
+    if [ \$? -eq 0 ]; then
+        echo "→ OK"
+    else
+        echo "→ ERREUR"
     fi
-    chmod 666 "$LOG_FILE"
-
-    # Boucle de sauvegarde
-    for DIR in "${DIRS_TO_BACKUP[@]}"; do
-        echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR → $BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")${NC}"
-        rsync -avz --delete --exclude=lost+found \
-            -e "ssh -i ~/.ssh/serveur2.pem" \
-            "$DIR"/ "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")/" \
-            >> "$LOG_FILE" 2>&1
-
-        if [ $? -eq 0 ]; then
-            echo -e "${BLUE}→ OK${NC}"
-        else
-            echo -e "${RED}→ ERREUR${NC}"
-        fi
-        echo ""
-    done
-
-    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée.${NC}"
     echo ""
+done
 
-    # Rendre le script exécutable (pour cron)
-    chmod +x "$SCRIPT_PATH"
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
+
+EOL
+
+    # Rendre backup.sh exécutable
+    chmod +x "$BACKUP_SH"
+    echo "Script créé : $BACKUP_SH"
 
     # Installation de la tâche cron (02:00 chaque jour)
-    local CRON_JOB="0 2 * * * $SCRIPT_PATH >> $LOG_FILE 2>&1"
-    if crontab -l 2>/dev/null | grep -Fxq "$CRON_JOB"; then
+    local CRON_JOB="0 2 * * * $BACKUP_SH >> $LOG_FILE 2>&1"
+    if crontab -l 2>/dev/null | grep -Fqx "$CRON_JOB"; then
         echo "La tâche cron existe déjà, rien à faire."
     else
         ( crontab -l 2>/dev/null; echo "$CRON_JOB" ) | crontab -
