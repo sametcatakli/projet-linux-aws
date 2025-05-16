@@ -1225,7 +1225,7 @@ enabled = true
 port = ssh
 filter = sshd
 logpath = /var/log/secure
-maxretry = 3
+maxretry = 10
 bantime = 3600
 EOL
 

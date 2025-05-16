@@ -29,6 +29,15 @@ add_user() {
   echo "Adding a user ..."
   read -p "Enter the server domain name (e.g., example.com) : " DOMAIN_NAME
   read -p "Enter a username: " USERNAME
+
+  # Refuse creation of 'root'
+  if [[ "$USERNAME" == "root" ]]; then
+    echo "Erreur : la création de l'utilisateur 'root' est interdite."
+    echo "Appuyez sur une touche pour continuer..."
+    read -n 1 -s
+    return
+  fi
+
   read -sp "Enter a password: " PASSWORD
   echo
   echo "Creating directory"
@@ -109,7 +118,6 @@ EOL
   mkdir -p "$DIR/ftp"
   chown $USERNAME:$USERNAME "$DIR/ftp"
   chmod 755 "$DIR/ftp"
-
 
   # Add firewall rule for FTP if not already added
   firewall-cmd --permanent --add-service=ftp
@@ -210,7 +218,7 @@ EOL
               # Increment the serial number in the SOA record
               serial=$(grep "Serial" /var/named/forward.$DOMAIN_NAME | awk '{print $1}')
               new_serial=$((serial + 1))
-              sed -i "s/$serial ; Serial/$new_serial ; Serial/" /var/named/forward.$DOMAIN_NAME
+              sed -i "s/$serial ; Serial/$new_serial ; Serial/" "/var/named/forward.$DOMAIN_NAME"
               # Reload named service
               systemctl reload named
               echo "DNS entry for $USERNAME.$DOMAIN_NAME added successfully."
@@ -242,6 +250,15 @@ remove_user() {
   echo "Users list : "
   pdbedit -L
   read -p "Enter a user to delete: " USERNAME
+
+  # Refuse deletion of 'root'
+  if [[ "$USERNAME" == "root" ]]; then
+    echo "Erreur : la suppression de l'utilisateur 'root' est interdite."
+    echo "Appuyez sur une touche pour continuer..."
+    read -n 1 -s
+    return
+  fi
+
   userdel -r $USERNAME  # -r flag removes home directory too
   smbpasswd -x $USERNAME
   rm -rf /srv/web/$USERNAME
