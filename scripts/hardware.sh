@@ -161,36 +161,16 @@ raid() {
   read -n 1 -s key
 }
 
-# Backup function
+
 backup() {
-    #!/bin/bash
-
-    # -----------------------
-    # Configuration
-    # -----------------------
-    BACKUP_USER="ec2-user"
-    BACKUP_HOST="10.42.0.129"
-    DIRS_TO_BACKUP=("/var" "/home" "/srv")
-    BACKUP_DIR="~/saveConf"
-    LOG_FILE="/var/log/backup.log"
-
-    # Chemin absolu du script (pour cron)
-    SCRIPT_PATH="$(readlink -f "$0")"
-
-
-    backup() {
-        for DIR in "${DIRS_TO_BACKUP[@]}"; do
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR vers $BACKUP_HOST:$BACKUP_DIR$(dirname $DIR)…"
-            rsync -avz --delete --exclude=lost+found \
-                -e "ssh -i ~/.ssh/serveur2.pem" \
-                "$DIR" "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname $DIR)/"
-        done
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
-    }
-
-    backup
-
-    chmod +x "$0"
+    local BACKUP_USER="ec2-user"
+    local BACKUP_HOST="10.42.0.129"
+    local DIRS_TO_BACKUP=("/var" "/home" "/srv")
+    local BACKUP_DIR="~/saveConf"
+    local LOG_FILE="/var/log/backup.log"
+    # Chemin absolu du script courant
+    local SCRIPT_PATH
+    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
 
     if [ ! -f "$LOG_FILE" ]; then
@@ -198,16 +178,23 @@ backup() {
     fi
     chmod 666 "$LOG_FILE"
 
+    for DIR in "${DIRS_TO_BACKUP[@]}"; do
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR → $BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")"
+        rsync -avz --delete --exclude=lost+found \
+            -e "ssh -i ~/.ssh/serveur2.pem" \
+            "$DIR" "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")/"
+    done
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
 
-    # Ligne cron à ajouter
-    CRON_JOB="0 2 * * * $SCRIPT_PATH >> $LOG_FILE 2>&1"
 
-    # On récupère la crontab (vide si inexistante), on cherche la ligne, et on la rajoute seulement si absente
+    chmod +x "$SCRIPT_PATH"
+
+    local CRON_JOB="0 2 * * * $SCRIPT_PATH >> $LOG_FILE 2>&1"
+    # récupère l'existante ou vide si aucune
     if crontab -l 2>/dev/null | grep -Fxq "$CRON_JOB"; then
         echo "La tâche cron existe déjà, rien à faire."
     else
         ( crontab -l 2>/dev/null; echo "$CRON_JOB" ) | crontab -
         echo "Tâche cron ajoutée : $CRON_JOB"
     fi
-
 }
