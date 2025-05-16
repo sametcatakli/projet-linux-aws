@@ -9,7 +9,7 @@ hardware_menu() {
     echo -e "|                 ${BLUE}Hardware Management Menu ${NC}                           |"
     echo "|----------------------------------------------------------------------|"
     echo "| 1. RAID Configuration                                                |"
-    echo "| 2. Backup to S3                                          |"
+    echo "| 2. Backup to server                                          |"
     echo "|----------------------------------------------------------------------|"
     echo "| q. Back to Main Menu                                                 |"
     echo "|----------------------------------------------------------------------|"
@@ -163,38 +163,59 @@ raid() {
 
 
 backup() {
+    clear
+    echo ""
+    echo "|----------------------------------------------------------------------|"
+    echo -e "|                     ${BLUE}Backup to Server${NC}                          |"
+    echo "|----------------------------------------------------------------------|"
+    echo ""
+
     local BACKUP_USER="ec2-user"
     local BACKUP_HOST="10.42.0.129"
-    local DIRS_TO_BACKUP=("/var" "/home" "/srv")
+    local DIRS_TO_BACKUP=( "/var" "/home" "/srv" )
     local BACKUP_DIR="~/saveConf"
     local LOG_FILE="/var/log/backup.log"
-    # Chemin absolu du script courant
     local SCRIPT_PATH
     SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
-
+    # Création et permissions du fichier de log
     if [ ! -f "$LOG_FILE" ]; then
         touch "$LOG_FILE"
     fi
     chmod 666 "$LOG_FILE"
 
+    # Boucle de sauvegarde
     for DIR in "${DIRS_TO_BACKUP[@]}"; do
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR → $BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")"
+        echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde de $DIR → $BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")${NC}"
         rsync -avz --delete --exclude=lost+found \
             -e "ssh -i ~/.ssh/serveur2.pem" \
-            "$DIR" "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")/"
+            "$DIR"/ "$BACKUP_USER@$BACKUP_HOST:$BACKUP_DIR$(dirname "$DIR")/" \
+            >> "$LOG_FILE" 2>&1
+
+        if [ $? -eq 0 ]; then
+            echo -e "${BLUE}→ OK${NC}"
+        else
+            echo -e "${RED}→ ERREUR${NC}"
+        fi
+        echo ""
     done
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée."
 
+    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] Sauvegarde terminée.${NC}"
+    echo ""
 
+    # Rendre le script exécutable (pour cron)
     chmod +x "$SCRIPT_PATH"
 
+    # Installation de la tâche cron (02:00 chaque jour)
     local CRON_JOB="0 2 * * * $SCRIPT_PATH >> $LOG_FILE 2>&1"
-    # récupère l'existante ou vide si aucune
     if crontab -l 2>/dev/null | grep -Fxq "$CRON_JOB"; then
         echo "La tâche cron existe déjà, rien à faire."
     else
         ( crontab -l 2>/dev/null; echo "$CRON_JOB" ) | crontab -
         echo "Tâche cron ajoutée : $CRON_JOB"
     fi
+
+    echo ""
+    echo -e "Appuyez sur une touche pour revenir au menu hardware…"
+    read -n1 -s
 }
