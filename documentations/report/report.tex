@@ -194,17 +194,23 @@ Le partitionnement choisi permet d'optimiser sécurité, performance et gestion 
 
 \paragraph{Serveur DNS (BIND9)}
 
-Le serveur DNS a été mis en place à l'aide de BIND9, en s'appuyant sur le service named pour assurer la résolution des noms de domaine. Il prend en charge à la fois la résolution directe (DNS) et inverse (reverse DNS), ce qui permet d'héberger une zone DNS locale ainsi que les enregistrements associés aux noms de domaine utilisés par les clients du réseau. Pour garantir l'accès aux domaines externes — notamment pour les mises à jour logicielles ou les accès internet — un mécanisme de forwarding a été configuré : les requêtes en dehors de la zone locale sont redirigées vers les serveurs DNS publics de Cloudflare. Cette approche assure à la fois une résolution rapide, fiable et sécurisée des noms externes, tout en gardant un contrôle total sur la zone DNS interne.
+Le serveur DNS a été mis en place à l'aide de BIND9, en s'appuyant sur le service named pour assurer la résolution des noms de domaine. Il prend en charge à la fois la résolution directe (DNS) et inverse (reverse DNS), ce qui permet d'héberger une zone DNS locale ainsi que les enregistrements associés aux noms de domaine utilisés par les clients du réseau. Pour garantir l'accès aux domaines externes  notamment pour les mises à jour logicielles ou les accès internet, un mécanisme de forwarding a été configuré : les requêtes en dehors de la zone locale sont redirigées vers les serveurs DNS publics de Cloudflare. Cette approche assure à la fois une résolution rapide, fiable et sécurisée des noms externes, tout en gardant un contrôle total sur la zone DNS interne.
 
 \needspace{8\baselineskip}
 \begin{lstlisting}[caption={Configuration DNS BIND9 – /etc/named.conf}]
 options {
     listen-on port 53 { any; };
-    directory "/var/named";
-    recursion yes;
-    allow-query { any; };
-    allow-transfer { none; };
+    directory       "/var/named";
+    recursion       yes;
+    allow-query     { any; };
+    allow-transfer  { none; };
     dnssec-validation auto;
+
+    forward only;
+    forwarders {
+        1.1.1.1;
+        1.0.0.1;
+    };
 };
 
 zone "." IN {
@@ -243,9 +249,9 @@ ns      IN  A       10.42.0.109
 
 Des mesures de sécurité spécifiques ont été appliquées :
 \begin{itemize}
-    \item Limitation des transferts de zone (\texttt{allow-transfer \{ none; \}})
-    \item Configuration du service pour écouter uniquement sur les interfaces nécessaires
-    \item Utilisation de \texttt{dnssec-validation auto} pour renforcer la sécurité des réponses DNS
+    \item Limitation des transferts de zone (\texttt{allow-transfer \{ none; \}}).
+    \item Configuration du service pour écouter uniquement sur les interfaces nécessaires.
+    \item Utilisation de \texttt{dnssec-validation auto} pour renforcer la sécurité des réponses DNS.
 \end{itemize}
 
 \paragraph{Serveur NTP (Chrony)}
@@ -513,7 +519,7 @@ Cette tâche cron exécute quotidiennement à 2h du matin un script de sauvegard
 
 \subsection{Configuration SSH}
 
-Afin de garantir un accès sécurisé au serveur, une configuration SSH renforcée a été mise en œuvre. La connexion directe en tant qu'utilisateur root a été désactivée, tout comme l'authentification par mot de passe, afin de réduire les risques liés aux attaques par force brute ou à l'utilisation de mots de passe faibles. Seules les connexions via des paires de clés SSH sont autorisées, assurant ainsi une méthode d'authentification plus robuste. De plus, l'activation des journaux de connexion permet un suivi précis des accès, tandis que l'intégration de Fail2Ban contribue à bloquer automatiquement les tentatives suspectes, ajoutant une couche supplémentaire de protection à l'interface SSH.
+Afin de garantir un accès sécurisé au serveur, une configuration SSH renforcée a été mise en oeuvre. La connexion directe en tant qu'utilisateur root a été désactivée, tout comme l'authentification par mot de passe, afin de réduire les risques liés aux attaques par force brute ou à l'utilisation de mots de passe faibles. Seules les connexions via des paires de clés SSH sont autorisées, assurant ainsi une méthode d'authentification plus robuste. De plus, l'activation des journaux de connexion permet un suivi précis des accès, tandis que l'intégration de Fail2Ban contribue à bloquer automatiquement les tentatives suspectes, ajoutant une couche supplémentaire de protection à l'interface SSH.
 
 \needspace{6\baselineskip}
 \begin{lstlisting}[caption={Configuration SSH – /etc/ssh/sshd\textunderscore config}]
@@ -610,7 +616,7 @@ tmpfs /tmp tmpfs defaults,noexec,nosuid,nodev,size=2G 0 0
 \subsection{Fail2Ban}
 
 Fail2Ban est un outil de sécurité permettant de protéger le système contre les attaques par force brute en surveillant les fichiers journaux de plusieurs services critiques (comme SSH, FTP, SMTP, Apache, etc.). Lorsqu'il détecte des tentatives de connexion répétées échouées, il bloque automatiquement l'adresse IP de l'attaquant en configurant temporairement le pare-feu, réduisant ainsi les risques d'intrusion ou d'exploitation.\\
-Voici les configuration fail2ban déploiyé: 
+Voici les configuration fail2ban déployé: 
 
 \needspace{5\baselineskip}
 \begin{lstlisting}[caption={Configuration Fail2Ban SSH – /etc/fail2ban/jail.d/sshd.local}]
@@ -712,7 +718,7 @@ L'architecture générale des scripts est structurée comme suit :
         \item \textbf{\texttt{filesharing.sh}} : installe et configure les services de partage de fichiers tels que FTP, Samba et NFS, en incluant les répertoires partagés accessibles publiquement.
         \item \textbf{\texttt{webservices.sh}} : installe et configure les services web, notamment le serveur Apache, la base de données MariaDB (dans la partition dédiée), ainsi que l'interface d'administration \texttt{phpMyAdmin}.
         \item \textbf{\texttt{usermanagement.sh}} : permet d'ajouter ou de supprimer un utilisateur en configurant simultanément ses accès aux services (utilisateurs système, Samba, FTP, MariaDB) et son domaine associé dans le serveur DNS.
-        \item \textbf{\texttt{security.sh}} : met en œuvre la politique de sécurité du serveur à travers la configuration de modules tels que le pare-feu, SELinux, les options de montage, ainsi que l'installation d'un antivirus et d'un anti-rootkit. Ce script est conçu pour offrir une certaine flexibilité d'adaptation aux besoins spécifiques.
+        \item \textbf{\texttt{security.sh}} : met en oeuvre la politique de sécurité du serveur à travers la configuration de modules tels que le pare-feu, SELinux, les options de montage, ainsi que l'installation d'un antivirus et d'un anti-rootkit. Ce script est conçu pour offrir une certaine flexibilité d'adaptation aux besoins spécifiques.
         \item \textbf{\texttt{monitoring.sh}} : installe et configure le client ou le serveur Netdata, en utilisant l'adresse IP et la clé API pour l'interconnexion.
     \end{itemize}
 \end{itemize}
@@ -753,7 +759,7 @@ Ce programme de script permet la configuration complète de A à Z des différen
 \section{Problèmes rencontrés}
 
 \begin{itemize}
-	\item \textbf{Problèmes d'authentification AWS} : difficultés persistantes avec l'authentification à AWS S3 et S3 Glacier malgré l'utilisation des bonnes clés API et secrets pour accéder aux buckets. Malgré plusieurs tentatives avec différentes permissions IAM, les clés d'accès étaient systématiquement refusées, nous obligeant à adopter une solution alternative.
+	\item \textbf{Problèmes d'authentification AWS} : difficultés persistantes avec l'authentification à AWS S3 et S3 Glacier malgré l'utilisation des bonnes clés API et API secrets pour accéder aux buckets. Malgré plusieurs tentatives avec différentes permissions IAM, les clés d'accès étaient systématiquement refusées, nous obligeant à adopter une solution alternative.
 	
 	\item \textbf{Instabilité réseau} : qualité médiocre de la connexion rendant la communication extrêmement lente, compliquant significativement les opérations de déploiement et maintenance. Les temps de latence importants ont rendu difficile le débogage en temps réel.
 	
@@ -771,10 +777,10 @@ Nous avons réussi à atteindre les objectifs principaux du projet en déployant
     \item Des solutions de partage de fichiers avec SAMBA, FTP et NFS
     \item Un système de monitoring en temps réel
     \item Des sauvegardes automatisées et fiables
-    \item Une sécurité multicouche protégeant contre différentes menaces
+    \item Une sécurité multicouche protégeant contre différentes menaces\\
 \end{itemize}
-
-Si nous avions disposé de davantage de temps, nous aurions pu développer les aspects suivants :
+\\
+Si nous avions disposé  d'avantage de temps, nous aurions pu développer les aspects suivants :
 \begin{itemize}
     \item Mise en place d'une solution de haute disponibilité sur plusieurs noeuds
     \item Configuration de sécurité plus avancée (php no exec, options de montages correctes et poussée)

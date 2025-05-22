@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999995 (TeX Live 2023) (preloaded format=xelatex 2025.4.23)  22 MAY 2025 18:25
+This is XeTeX, Version 3.141592653-2.6-0.999995 (TeX Live 2023) (preloaded format=xelatex 2025.4.23)  22 MAY 2025 19:01
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -916,14 +916,13 @@ File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
  [5]
-Missing character: There is no — ("2014) in font ec-lmr12!
-Missing character: There is no — ("2014) in font ec-lmr12!
 Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on i
 nput line 200.
 LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <7> on input line 201.
 LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <5> on input line 201.
+
 Missing character: There is no – ("2013) in font ec-lmr12!
 Missing character: There is no – ("2013) in font ec-lmr12!
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
@@ -1029,7 +1028,7 @@ Missing character: There is no – ("2013) in font ec-lmr12!
 Missing character: There is no – ("2013) in font ec-lmr12!
 Missing character: There is no – ("2013) in font ec-lmr12!
 
-Underfull \hbox (badness 10000) in paragraph at lines 493--496
+Underfull \hbox (badness 10000) in paragraph at lines 499--502
 
  []
 
@@ -1045,7 +1044,6 @@ File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
 [13]
-Missing character: There is no œ ("153) in font ec-lmr12!
 Missing character: There is no – ("2013) in font ec-lmr12!
 Missing character: There is no – ("2013) in font ec-lmr12!
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
@@ -1135,9 +1133,7 @@ phic file (type bmp)
 
 ]
 LaTeX Font Info:    Font shape `T1/lmtt/bx/n' in size <12> not available
-(Font)              Font shape `T1/lmtt/b/n' tried instead on input line 707.
-
-Missing character: There is no œ ("153) in font ec-lmr12!
+(Font)              Font shape `T1/lmtt/b/n' tried instead on input line 713.
 File: main.png Graphic file (type bmp)
 <main.png>
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
@@ -1149,7 +1145,7 @@ phic file (type bmp)
 File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
-[20]
+ [20]
 File: firewall.png Graphic file (type bmp)
 <firewall.png>
 File: selinux.png Graphic file (type bmp)
@@ -1176,6 +1172,24 @@ File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
  [22]
+Underfull \hbox (badness 10000) in paragraph at lines 780--781
+
+ []
+
+
+! LaTeX Error: There's no line here to end.
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.783 S
+       i nous avions disposé  d'avantage de temps, nous aurions pu développe...
+
+Your command was ignored.
+Type  I <command> <return>  to replace it with another command,
+or  <return>  to continue without it.
+
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
 hic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/fwb.png>
@@ -1185,20 +1199,20 @@ phic file (type bmp)
 File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
- [23]
-Underfull \hbox (badness 1077) in paragraph at lines 796--797
+[23]
+Underfull \hbox (badness 1077) in paragraph at lines 802--803
 []\T1/lmr/m/n/12 The Chrony Pro-ject, \T1/lmr/m/it/12 Chrony Do-cu-men-ta-tion\
 T1/lmr/m/n/12 , []$\T1/lmtt/m/n/12 https : / / chrony . tuxfamily . org /
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 808--809
+Underfull \hbox (badness 10000) in paragraph at lines 814--815
 \T1/lmtt/m/n/12 com / documentation / en-[]us / red _ hat _ enterprise _ linux 
 / 7 / html / selinux _ users _
  []
 
 
-Overfull \hbox (149.88518pt too wide) in paragraph at lines 816--817
+Overfull \hbox (149.88518pt too wide) in paragraph at lines 822--823
 []$\T1/lmtt/m/n/12 https : / / trello . com / invite / b / 6823356ebf1cd401ea01
 75e8 / ATTI3a52839bae87ca535511781bc7c023eaEEC1B0DF /
  []
