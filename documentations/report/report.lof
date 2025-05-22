@@ -1,0 +1,6 @@
+\babel@toc {french}{}\relax 
+\contentsline {figure}{\numberline {1}{\ignorespaces Dashboard Netdata montrant l'état de santé du système et des services.\relax }}{12}{figure.caption.1}%
+\contentsline {figure}{\numberline {2}{\ignorespaces Aperçu du script principal \texttt {main.sh} gérant les déploiements automatisés.\relax }}{21}{figure.caption.2}%
+\contentsline {figure}{\numberline {3}{\ignorespaces Aperçu du script \texttt {security.sh} gérant les règles de firewalls.\relax }}{21}{figure.caption.3}%
+\contentsline {figure}{\numberline {4}{\ignorespaces Aperçu du script \texttt {security.sh} gérant les règles selinux.\relax }}{22}{figure.caption.4}%
+\contentsline {figure}{\numberline {5}{\ignorespaces Aperçu du script \texttt {usermanagement.sh} gérant les utilisateurs.\relax }}{22}{figure.caption.5}%

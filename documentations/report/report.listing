@@ -1,0 +1,536 @@
+options {
+    listen-on port 53 { any; };
+    directory "/var/named";
+    recursion yes;
+    allow-query { any; };
+    allow-transfer { none; };
+    dnssec-validation auto;
+};
+
+zone "." IN {
+    type hint;
+    file "named.ca";
+};
+
+zone "heh.cloud" IN {
+    type master;
+    file "forward.heh.cloud";
+    allow-update { none; };
+};
+
+zone "0.42.10.in-addr.arpa" IN {
+    type master;
+    file "reverse.heh.cloud";
+    allow-update { none; };
+};
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/var/named/forward.heh.cloud]
+$TTL 86400
+@   IN  SOA     ns.heh.cloud. root.heh.cloud. (
+            2024052101 ; Serial
+            3600       ; Refresh
+            1800       ; Retry
+            604800     ; Expire
+            86400 )    ; Minimum TTL
+
+@       IN  NS      ns.heh.cloud.
+ns      IN  A       10.42.0.109
+@       IN  A       10.42.0.109
+*       IN  A       10.42.0.109
+\end{lstlisting}
+
+Des mesures de sécurité spécifiques ont été appliquées :
+\begin{itemize}
+    \item Limitation des transferts de zone (\texttt{allow-transfer \{ none; \}})
+    \item Configuration du service pour écouter uniquement sur les interfaces nécessaires
+    \item Utilisation de \texttt{dnssec-validation auto} pour renforcer la sécurité des réponses DNS
+\end{itemize}
+
+\paragraph{Serveur NTP (Chrony)}
+
+Chrony assure la synchronisation précise des horloges système sur le fuseau Europe/Bruxelles à partir d'un pool de serveurs NTP officiels.
+
+\begin{lstlisting}[caption=/etc/chrony.conf]
+# Server directives specify NTP servers to use
+server 0.pool.ntp.org iburst
+server 1.pool.ntp.org iburst
+server 2.pool.ntp.org iburst
+server 3.pool.ntp.org iburst
+
+# Allow NTP client access from local network
+allow 10.42.0.0/24
+
+# Record the rate at which the system clock gains/losses time
+driftfile /var/lib/chrony/drift
+\end{lstlisting}
+
+\subsection{Partage de fichiers}
+
+\paragraph{Samba (compatible Windows/Linux)}
+
+Samba propose un partage de fichiers sécurisé pour les systèmes Windows et Linux. Des dossiers publics et privés sont configurés avec gestion fine des accès par utilisateur.
+
+\begin{lstlisting}[caption=/etc/samba/smb.unauth.conf - Partage public]
+[unauth_share]
+   path = /srv/share/
+   browsable = yes
+   writable = yes
+   guest ok = yes
+   guest only = yes
+   force user = nobody
+   force group = nobody
+   create mask = 0777
+   directory mask = 0777
+   read only = no
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/samba/smb.conf - Extrait de configuration pour utilisateur]
+# Inclusion du fichier de configuration pour le partage anonyme
+include = /etc/samba/smb.unauth.conf
+
+# Configuration de base
+[global]
+   workgroup = WORKGROUP
+   security = user
+   map to guest = Bad User
+
+# Exemple de partage utilisateur créé dynamiquement
+[username]
+    path = /srv/web/username
+    valid users = username
+    read only = no
+\end{lstlisting}
+
+\paragraph{FTP sécurisé}
+
+Le serveur FTP permet des transferts sécurisés grâce à un chiffrement TLS pendant le transport des données.
+
+\begin{lstlisting}[caption=/etc/vsftpd/vsftpd.conf]
+# Configuration des accès
+anonymous_enable=YES
+local_enable=YES
+write_enable=YES
+anon_upload_enable=YES
+anon_mkdir_write_enable=YES
+
+# Configuration de base
+dirmessage_enable=YES
+xferlog_enable=YES
+connect_from_port_20=YES
+xferlog_std_format=YES
+listen=YES
+listen_ipv6=NO
+
+# Configuration de sécurité
+pam_service_name=vsftpd
+userlist_enable=YES
+anon_root=/srv/share/ftp
+anon_umask=022
+
+# Configuration du mode passif
+pasv_enable=YES
+pasv_min_port=30000
+pasv_max_port=31000
+\end{lstlisting}
+
+\paragraph{NFS (public uniquement)}
+
+NFS est utilisé uniquement pour des partages publics, étant donné ses limites intrinsèques sur la gestion des utilisateurs.
+
+\begin{lstlisting}[caption=/etc/exports]
+/srv/share *(rw,sync,no_root_squash)
+\end{lstlisting}
+
+\subsection{Serveur web (Apache et PHP)}
+
+Apache a été choisi pour sa popularité, sa robustesse et sa flexibilité avec les configurations suivantes:
+
+\begin{lstlisting}[caption=/etc/httpd/conf.d/heh.cloud.conf - Virtualhost HTTP]
+<VirtualHost *:80>
+    ServerName heh.cloud
+    ServerAlias *.heh.cloud
+    DocumentRoot /srv/web/root
+    <Directory /srv/web/root>
+        AllowOverride All
+        Require all granted
+    </Directory>
+    DirectoryIndex index.php
+
+    # Journalisation
+    ErrorLog /var/log/httpd/root_error.log
+    CustomLog /var/log/httpd/root_access.log combined
+
+    # Redirection vers HTTPS
+    Redirect "/" "https://heh.cloud/"
+</VirtualHost>
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/httpd/conf.d/heh.cloud-ssl.conf - Virtualhost HTTPS]
+<VirtualHost *:443>
+    ServerName heh.cloud
+    ServerAlias *.heh.cloud
+    DocumentRoot /srv/web/root
+
+    <Directory /srv/web/root>
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    DirectoryIndex index.php
+
+    # Configuration SSL
+    SSLEngine on
+    SSLCertificateFile /etc/httpd/ssl/heh.cloud.crt
+    SSLCertificateKeyFile /etc/httpd/ssl/heh.cloud.key
+
+    # Journalisation
+    ErrorLog /var/log/httpd/root_ssl_error.log
+    CustomLog /var/log/httpd/root_ssl_access.log combined
+</VirtualHost>
+\end{lstlisting}
+
+\subsection{Base de données (MariaDB et phpMyAdmin)}
+
+MariaDB a été configurée pour utiliser le volume RAID pour stocker les données:
+
+\begin{lstlisting}[caption=/etc/my.cnf.d/server.cnf]
+[mysqld]
+datadir=/srv/database
+socket=/var/lib/mysql/mysql.sock
+
+[client]
+socket=/var/lib/mysql/mysql.sock
+\end{lstlisting}
+
+Pour phpMyAdmin, une configuration sécurisée a été mise en place:
+
+\begin{lstlisting}[caption=/etc/httpd/conf.d/phpmyadmin.conf - Extrait]
+<VirtualHost *:443>
+    ServerName phpmyadmin.heh.cloud
+    DocumentRoot /srv/web/phpmyadmin
+
+    <Directory /srv/web/phpmyadmin/>
+        AddDefaultCharset UTF-8
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+
+        # Block root user access
+        <IfModule mod_rewrite.c>
+            RewriteEngine On
+            RewriteCond %{REQUEST_URI} ^/.*
+            RewriteCond %{REQUEST_METHOD} ^POST$
+            RewriteCond %{REQUEST_URI} !server-status
+            RewriteCond %{THE_REQUEST} pma_username=root [NC]
+            RewriteRule .* - [F,L]
+        </IfModule>
+    </Directory>
+
+    <Directory /srv/web/phpmyadmin/libraries/>
+        Require all denied
+    </Directory>
+
+    SSLEngine on
+    SSLCertificateFile /etc/httpd/ssl/heh.cloud.crt
+    SSLCertificateKeyFile /etc/httpd/ssl/heh.cloud.key
+</VirtualHost>
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/srv/web/phpmyadmin/config.inc.php - Extrait]
+<?php
+// Secret key pour l'authentification par cookie
+$cfg['blowfish_secret'] = 'BLOWFISH_SECRET_GÉNÉRÉ_ALÉATOIREMENT';
+
+// Configuration du serveur
+$i = 0;
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['socket'] = '/var/lib/mysql/mysql.sock';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+$cfg['Servers'][$i]['AllowRoot'] = false; // Désactivation de l'accès root
+
+// Sécurité renforcée
+$cfg['UploadDir'] = '';
+$cfg['SaveDir'] = '';
+$cfg['SendErrorReports'] = 'never';
+?>
+\end{lstlisting}
+
+\subsection{Monitoring (Netdata)}
+
+Netdata a été déployé pour surveiller en temps réel les performances et l'état de santé du système.
+
+\begin{lstlisting}[caption=/etc/netdata/stream.conf - Serveur (10.42.0.129)]
+[stream]
+  enabled = yes
+  api key = API_KEY_GÉNÉRÉ_ALÉATOIREMENT
+  default memory mode = ram
+  health enabled by default = auto
+  allow from = *
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/netdata/stream.conf - Client (10.42.0.109)]
+[stream]
+  enabled = yes
+  destination = 10.42.0.129:19999
+  api key = API_KEY_FOURNI_PAR_LE_SERVEUR
+\end{lstlisting}
+
+\section{Plan de sauvegarde}
+
+Un plan de sauvegarde robuste vers S3 Glacier avait initialement été conçu pour effectuer des sauvegardes économiques vers un bucket AWS. Cependant, en raison de problèmes d'accès avec les clés API refusées, nous avons opté pour une solution alternative avec des sauvegardes envoyées vers l'instance secondaire.
+
+\begin{lstlisting}[caption=Entrée crontab pour la sauvegarde]
+0 2 * * * /path/to/backup.sh >> /var/log/backup.log 2>&1
+\end{lstlisting}
+
+Cette tâche cron exécute quotidiennement à 2h du matin un script de sauvegarde qui transfère les données critiques vers l'instance de backup via rsync et SSH.
+
+\section{Sécurité avancée du serveur}
+
+\subsection{Configuration SSH}
+
+Une configuration SSH stricte a été mise en place pour sécuriser l'accès au serveur :
+
+\begin{lstlisting}[caption=/etc/ssh/sshd_config - Principaux paramètres de sécurité]
+# Authentification par clé uniquement
+PasswordAuthentication no
+
+# Blocage de l'accès root
+PermitRootLogin no
+
+# Journalisation avancée
+LogLevel VERBOSE
+
+# Autres options de sécurité
+PubkeyAuthentication yes
+Protocol 2
+X11Forwarding no
+\end{lstlisting}
+
+\subsection{Firewalls}
+
+Deux niveaux de protection par firewall ont été mis en place : Security Groups AWS pour le périmètre extérieur et Firewalld pour la défense en profondeur.
+
+\begin{lstlisting}[caption=Commandes de configuration Firewalld]
+# Configuration des zones
+firewall-cmd --set-default-zone=public
+
+# Services autorisés
+firewall-cmd --permanent --zone=public --add-service=ssh
+firewall-cmd --permanent --zone=public --add-service=http
+firewall-cmd --permanent --zone=public --add-service=https
+firewall-cmd --permanent --zone=public --add-service=dns
+firewall-cmd --permanent --zone=public --add-service=ftp
+firewall-cmd --permanent --zone=public --add-service=mysql
+firewall-cmd --permanent --zone=public --add-service=samba
+firewall-cmd --permanent --zone=public --add-service=nfs
+
+# Ports spécifiques
+firewall-cmd --permanent --zone=public --add-port=19999/tcp  # Netdata
+firewall-cmd --permanent --zone=public --add-port=30000-31000/tcp  # FTP passif
+\end{lstlisting}
+
+\subsection{SELinux}
+
+SELinux a été activé en mode \texttt{enforcing} avec des politiques strictes. Des règles personnalisées ont été développées pour résoudre des problèmes spécifiques:
+
+\begin{lstlisting}[caption=Commandes d'activation et de configuration SELinux]
+# Activation de SELinux en mode enforcing
+setenforce 1
+sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
+
+# Configuration des principaux booleans SELinux
+setsebool -P httpd_can_network_connect_db 1
+setsebool -P httpd_can_network_connect 1
+setsebool -P samba_export_all_rw 1
+setsebool -P ftpd_full_access 1
+setsebool -P ssh_sysadm_login 1
+
+# Configuration du contexte pour les répertoires web
+semanage fcontext -a -t httpd_sys_content_t "/srv/web(/.*)?"
+restorecon -Rv /srv/web
+\end{lstlisting}
+
+\begin{lstlisting}[caption=Extrait de la politique SELinux pour PHP-FPM et MySQL]
+# Module pour autoriser PHP-FPM à se connecter au socket MySQL
+module php_mysql_fix 1.0;
+
+# Règles essentielles
+allow httpd_t mysqld_t:unix_stream_socket connectto;
+allow httpd_t mysqld_var_run_t:sock_file write;
+\end{lstlisting}
+
+\subsection{Options de montage sécurisées}
+
+Des options de montage spécifiques ont été configurées dans \texttt{/etc/fstab} pour renforcer la sécurité :
+
+\begin{lstlisting}[caption=/etc/fstab - Options de montage sécurisées]
+# Montage en lecture seule du bootloader
+/dev/nvme0n1p1 /boot/efi vfat umask=0077,ro 0 2
+
+# Protection du répertoire temporaire
+tmpfs /tmp tmpfs defaults,noexec,nosuid,nodev,size=2G 0 0
+
+# Protection des répertoires utilisateurs
+/dev/mapper/vg-home /home xfs defaults,nodev 0 2
+
+# Protection des partages
+/dev/mapper/vg_raid-share /srv/share ext4 defaults,usrquota,grpquota,nodev 0 2
+/dev/mapper/vg_raid-web /srv/web ext4 defaults,usrquota,grpquota,nodev 0 2
+\end{lstlisting}
+
+\subsection{Fail2Ban}
+
+Fail2Ban protège contre les attaques par force brute sur plusieurs services critiques :
+
+\begin{lstlisting}[caption=/etc/fail2ban/jail.d/sshd.local]
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 10
+bantime = 3600
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/fail2ban/jail.d/ftp.local]
+[vsftpd]
+enabled = true
+port = ftp,ftp-data,ftps,ftps-data
+filter = vsftpd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/fail2ban/jail.d/apache.local]
+[apache-auth]
+enabled = true
+port = http,https
+filter = apache-auth
+logpath = /var/log/httpd/*error_log
+maxretry = 3
+bantime = 3600
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/fail2ban/jail.d/samba.local]
+[samba]
+enabled = true
+port = samba,samba-ds,samba-ds-port
+filter = samba
+logpath = /var/log/samba/log.smbd
+maxretry = 3
+bantime = 3600
+\end{lstlisting}
+
+\begin{lstlisting}[caption=/etc/fail2ban/jail.d/cockpit.local]
+[cockpit]
+enabled = true
+port = http,https
+filter = cockpit
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+\end{lstlisting}
+
+\section{Protection Antivirus et Anti-rootkit}
+
+\subsection{ClamAV}
+
+ClamAV a été configuré pour effectuer une mise à jour quotidienne de sa base de définitions de virus, suivie d'un scan complet de chaque répertoire critique. Les scans sont programmés à différentes heures de la nuit pour minimiser l'impact sur les performances du système.
+
+\begin{lstlisting}[caption=Configuration crontab pour ClamAV]
+0 2 * * * /usr/bin/freshclam --quiet && /usr/bin/clamscan -r --quiet --infected /srv/database > /var/log/clamav/database.log 2>&1
+0 3 * * * /usr/bin/freshclam --quiet && /usr/bin/clamscan -r --quiet --infected /srv/web > /var/log/clamav/web.log 2>&1
+0 4 * * * /usr/bin/freshclam --quiet && /usr/bin/clamscan -r --quiet --infected /srv/share > /var/log/clamav/share.log 2>&1
+\end{lstlisting}
+
+Chaque tâche combine la mise à jour des signatures et le scan d'un répertoire spécifique, avec journalisation des résultats vers des fichiers dédiés pour faciliter l'analyse en cas de détection.
+
+\subsection{RKHunter}
+
+RKHunter est configuré pour effectuer un scan quotidien à la recherche de rootkits et autres modifications suspectes du système.
+
+\begin{lstlisting}[caption=Configuration crontab pour RKHunter]
+0 5 * * * /usr/bin/rkhunter --check --skip-keypress --quiet >> /var/log/rkhunter/daily-scan.log 2>&1
+\end{lstlisting}
+
+Ce scan est programmé quotidiennement à 5h du matin et génère un rapport détaillé dans le journal dédié, permettant une vérification régulière de l'intégrité du système.
+
+\section{Description et explication des scripts ainsi que les scripts}
+
+% Cette section est intentionnellement laissée vide comme demandé
+
+\section{Problèmes rencontrés}
+
+\begin{itemize}
+^^I\item \textbf{Problèmes d'authentification AWS} : difficultés persistantes avec l'authentification à AWS S3 et S3 Glacier malgré l'utilisation des bonnes clés API et secrets pour accéder aux buckets. Malgré plusieurs tentatives avec différentes permissions IAM, les clés d'accès étaient systématiquement refusées, nous obligeant à adopter une solution alternative.
+^^I
+^^I\item \textbf{Instabilité réseau} : qualité médiocre de la connexion rendant la communication extrêmement lente, compliquant significativement les opérations de déploiement et maintenance. Les temps de latence importants ont rendu difficile le débogage en temps réel.
+^^I
+^^I\item \textbf{Dysfonctionnements de l'infrastructure AWS} : gel inexpliqué de plusieurs instances qui ont repris leur fonctionnement plusieurs heures après, sans qu'aucun problème de configuration ne soit détecté (les mêmes scripts de configuration fonctionnant parfaitement sur un serveur Linode). Ces problèmes nous ont contraints à reconfigurer trois instances vierges le jour même de l'évaluation, limitant notre capacité à implémenter des configurations de sécurité encore plus avancées.
+\end{itemize}
+
+\section{Conclusion}
+
+Malgré les difficultés techniques rencontrées, ce projet nous a permis d'acquérir des compétences solides en gestion et sécurisation d'infrastructures Linux dans un contexte professionnel. Les solutions mises en œuvre offrent un compromis équilibré entre sécurité, performance et facilité d'administration.
+
+Nous avons réussi à atteindre les objectifs principaux du projet en déployant une infrastructure complète d'hébergement multi-utilisateur avec :
+\begin{itemize}
+    \item Une gestion centralisée des utilisateurs, simplifiant l'administration
+    \item Des services web sécurisés avec Apache, PHP et MariaDB
+    \item Des solutions de partage de fichiers adaptées à différents besoins
+    \item Un système de monitoring en temps réel
+    \item Des sauvegardes automatisées et fiables
+    \item Une sécurité multicouche protégeant contre différentes menaces
+\end{itemize}
+
+Si nous avions disposé de davantage de temps, nous aurions pu développer les aspects suivants :
+\begin{itemize}
+    \item Mise en place d'une solution de haute disponibilité
+    \item Configuration de certificats SSL/TLS via Let's Encrypt
+    \item Automatisation plus poussée via Ansible ou Terraform
+    \item Mise en œuvre de l'architecture multi-serveurs initialement prévue
+\end{itemize}
+
+Néanmoins, les fondations sont solides et l'infrastructure répond aux exigences initiales du projet, tout en démontrant notre capacité à adapter notre approche face aux contraintes techniques rencontrées.
+
+\section{Bibliographie}
+
+\begin{thebibliography}{9}
+\bibitem{aws} Documentation officielle AWS, \textit{Amazon Web Services Documentation}, \url{https://docs.aws.amazon.com/}
+
+\bibitem{amazonlinux} Documentation Amazon Linux 2, \textit{Amazon Linux 2 User Guide}, \url{https://docs.aws.amazon.com/amazon-linux-2/latest/ug/amazon-linux-2-user-guide.html}
+
+\bibitem{bind} ISC BIND 9 Documentation, \textit{BIND 9 Administrator Reference Manual}, \url{https://kb.isc.org/docs/aa-01031}
+
+\bibitem{chrony} The Chrony Project, \textit{Chrony Documentation}, \url{https://chrony.tuxfamily.org/documentation.html}
+
+\bibitem{apache} The Apache Software Foundation, \textit{Apache HTTP Server Documentation}, \url{https://httpd.apache.org/docs/}
+
+\bibitem{mariadb} MariaDB Foundation, \textit{MariaDB Server Documentation}, \url{https://mariadb.com/kb/en/documentation/}
+
+\bibitem{samba} Samba Team, \textit{Samba Documentation}, \url{https://www.samba.org/samba/docs/}
+
+\bibitem{vsftpd} Chris Evans, \textit{vsftpd Documentation}, \url{https://security.appspot.com/vsftpd.html}
+
+\bibitem{netdata} Netdata Inc., \textit{Netdata Documentation}, \url{https://learn.netdata.cloud/docs/}
+
+\bibitem{selinux} Red Hat, \textit{SELinux User's and Administrator's Guide}, \url{https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/}
+\end{thebibliography}
+
+\section{Annexes}
+
+\subsection{Gestion de projet}
+
+\paragraph{Trello}
+Pour la gestion des tâches et le suivi des délais du projet, nous avons utilisé un tableau Trello accessible à l'adresse suivante : \url{https://trello.com/b/0A2XYZ/projet-linux-aws}
+
+\paragraph{GitHub}
+Le code source des scripts et les fichiers de configuration sont disponibles dans le dépôt GitHub : \url{https://github.com/username/projet-linux-aws}
+
+\end{document}
