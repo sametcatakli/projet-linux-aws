@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999995 (TeX Live 2023) (preloaded format=xelatex 2025.4.23)  22 MAY 2025 18:03
+This is XeTeX, Version 3.141592653-2.6-0.999995 (TeX Live 2023) (preloaded format=xelatex 2025.4.23)  22 MAY 2025 18:25
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -896,7 +896,6 @@ phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
 
 [3]
-Missing character: There is no œ ("153) in font ec-lmr12!
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
 hic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/fwb.png>
@@ -906,7 +905,7 @@ phic file (type bmp)
 File: /home/samet/Documents/projet-linux-aws/documentations/report/side.png Gra
 phic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/side.png>
-[4]
+ [4]
 File: /home/samet/Documents/projet-linux-aws/documentations/report/fwb.png Grap
 hic file (type bmp)
 </home/samet/Documents/projet-linux-aws/documentations/report/fwb.png>
